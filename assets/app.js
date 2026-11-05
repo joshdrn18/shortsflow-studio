@@ -35,6 +35,81 @@ $("#source-file").addEventListener("change", (event) => {
   event.target.value = "";
 });
 $("#view-activity").addEventListener("click", () => toast("No activity has been recorded yet."));
+let authMode = "login";
+function setAuthMode(mode) {
+  authMode = mode;
+  const registering = mode === "register";
+  $("#auth-login-tab").classList.toggle("selected", !registering);
+  $("#auth-register-tab").classList.toggle("selected", registering);
+  $("#auth-name-field").classList.toggle("hidden", !registering);
+  $("#auth-title").textContent = registering ? "Create your workspace." : "Welcome back.";
+  $("#auth-description").textContent = registering ? "Set up your private ShortsFlow workspace." : "Sign in to continue to your production workspace.";
+  $("#auth-submit").innerHTML = registering ? "Create account <span>→</span>" : "Sign in <span>→</span>";
+  $("#auth-password").autocomplete = registering ? "new-password" : "current-password";
+  $("#auth-message").textContent = "";
+  $("#auth-message").className = "auth-message";
+}
+function showAuth(message = "") {
+  $("#auth-overlay").classList.remove("hidden");
+  $("#auth-message").textContent = message;
+  $("#auth-message").className = "auth-message";
+}
+$("#auth-login-tab").addEventListener("click", () => setAuthMode("login"));
+$("#auth-register-tab").addEventListener("click", () => setAuthMode("register"));
+$("#auth-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("#auth-submit");
+  const message = $("#auth-message");
+  const payload = {
+    email: $("#auth-email").value.trim(),
+    password: $("#auth-password").value
+  };
+  if (authMode === "register") payload.displayName = $("#auth-name").value.trim();
+  button.disabled = true;
+  button.textContent = authMode === "register" ? "Creating workspace…" : "Signing in…";
+  message.textContent = "";
+  try {
+    const response = await fetch(authMode === "register" ? "/api/auth/register" : "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", accept: "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Could not authenticate. Please try again.");
+    $("#auth-overlay").classList.add("hidden");
+    $("#auth-password").value = "";
+    toast(authMode === "register" ? "Your workspace is ready." : "Welcome back.");
+    await loadWorkspaceSummary();
+  } catch (error) {
+    message.textContent = error.message || "Something went wrong. Please try again.";
+    message.className = "auth-message";
+  } finally {
+    button.disabled = false;
+    button.innerHTML = authMode === "register" ? "Create account <span>→</span>" : "Sign in <span>→</span>";
+  }
+});
+async function checkSession() {
+  try {
+    const healthResponse = await fetch("/api/health", { headers: { accept: "application/json" } });
+    if (!healthResponse.ok) return;
+    const health = await healthResponse.json();
+    if (!health.databaseConfigured || !health.database) return;
+    const response = await fetch("/api/auth/me", { headers: { accept: "application/json" } });
+    if (!response.ok) {
+      showAuth("Account setup is not complete yet. Please check the D1 migrations.");
+      return;
+    }
+    const data = await response.json();
+    if (data.authenticated) {
+      $("#auth-overlay").classList.add("hidden");
+      await loadWorkspaceSummary();
+    } else {
+      showAuth();
+    }
+  } catch {
+    // Do not block the dashboard preview when the API is not configured.
+  }
+}
 async function loadWorkspaceSummary() {
   try {
     const response = await fetch("/api/workspace/summary", { headers: { accept: "application/json" } });
@@ -80,4 +155,4 @@ $("#refresh-btn").addEventListener("click", () => {
   toast("System status refreshed.");
 });
 checkHealth();
-loadWorkspaceSummary();
+checkSession();
