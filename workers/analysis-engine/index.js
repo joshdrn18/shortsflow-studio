@@ -6,6 +6,89 @@ const DAILY_NEURON_BUDGET = 8000;
 const NEURONS_PER_AUDIO_MINUTE = 41.14;
 const LOCK_SECONDS = 600;
 
+
+const TOKEN_KEY_BYTES = 32;
+function decodeBase64(value) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+  return Uint8Array.from(atob(padded), char => char.charCodeAt(0));
+}
+async function decryptRefreshToken(value, secret) {
+  const raw = decodeBase64(secret);
+  if (raw.length !== TOKEN_KEY_BYTES) throw new Error("Invalid YouTube token encryption key.");
+  const key = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["decrypt"]);
+  const [ivText, cipherText] = String(value || "").split(".");
+  if (!ivText || !cipherText) throw new Error("Stored YouTube refresh token is invalid.");
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: decodeBase64(ivText) }, key, decodeBase64(cipherText));
+  return new TextDecoder().decode(plain);
+}
+async function processYoutubeJob(env) {
+  if (!env.DB || !env.SOURCE_MEDIA || !env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET || !env.YOUTUBE_TOKEN_ENCRYPTION_KEY) return;
+  const now = new Date().toISOString();
+  const workerId = crypto.randomUUID();
+  const job = await env.DB.prepare(`
+    UPDATE publishing_jobs SET status='uploading',attempts=attempts+1,updated_at=?
+    WHERE id=(SELECT p.id FROM publishing_jobs p JOIN clips c ON c.id=p.clip_id
+      WHERE p.platform='youtube' AND p.status='queued' AND COALESCE(p.scheduled_at,p.created_at)<=?
+      AND EXISTS(SELECT 1 FROM youtube_connections y WHERE y.workspace_id=c.workspace_id)
+      ORDER BY COALESCE(p.scheduled_at,p.created_at),p.created_at LIMIT 1)
+    AND status='queued' RETURNING *
+  `).bind(now,now).first();
+  if (!job) return;
+  try {
+    const connection = await env.DB.prepare("SELECT * FROM youtube_connections WHERE workspace_id=(SELECT workspace_id FROM clips WHERE id=?)").bind(job.clip_id).first();
+    if (!connection) throw new Error("YouTube channel connection is missing.");
+    const approved = await env.DB.prepare(`
+      SELECT a.storage_key,a.mime_type,a.size_bytes,a.metadata_version,m.version AS current_metadata_version,
+        r.id AS review_id
+      FROM clip_assets a JOIN clips c ON c.id=a.clip_id
+      JOIN clip_metadata m ON m.clip_id=c.id AND m.version=(SELECT MAX(version) FROM clip_metadata WHERE clip_id=c.id)
+      JOIN clip_reviews r ON r.clip_id=c.id AND r.render_asset_id=a.id AND r.metadata_version=m.version AND r.decision='approved'
+      WHERE a.id=? AND a.clip_id=? AND a.asset_type='render' AND a.metadata_version=m.version
+        AND a.metadata_version=? AND r.id=? AND a.version=(SELECT MAX(version) FROM clip_assets WHERE clip_id=c.id AND asset_type='render')
+    `).bind(job.render_asset_id,job.clip_id,job.metadata_version,job.review_id).first();
+    if (!approved) throw new Error("Approval no longer matches the latest render. Review the current clip again.");
+    const object = await env.SOURCE_MEDIA.get(approved.storage_key);
+    if (!object) throw new Error("Approved render file is missing from private R2 storage.");
+    const size = Number(approved.size_bytes || object.size || 0);
+    if (!size || size > 90 * 1024 * 1024) throw new Error("Render file is empty or exceeds the 90 MB publishing limit.");
+    const refreshToken = await decryptRefreshToken(connection.refresh_token_encrypted,env.YOUTUBE_TOKEN_ENCRYPTION_KEY);
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},
+      body:new URLSearchParams({client_id:env.YOUTUBE_CLIENT_ID,client_secret:env.YOUTUBE_CLIENT_SECRET,refresh_token:refreshToken,grant_type:"refresh_token"})
+    });
+    const tokens = await tokenResponse.json();
+    if (!tokenResponse.ok || !tokens.access_token) throw new Error(tokens.error_description || tokens.error || "Could not refresh YouTube access.");
+    const metadata = {
+      snippet:{title:String(job.title || "ShortsFlow Short").slice(0,100),description:String(job.description || "").slice(0,5000),tags:JSON.parse(job.tags_json || "[]"),categoryId:"22"},
+      status:{privacyStatus:job.privacy_status || "private",selfDeclaredMadeForKids:false}
+    };
+    const mimeType = approved.mime_type || "video/webm";
+    const init = await fetch("https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",{
+      method:"POST",headers:{Authorization:"Bearer "+tokens.access_token,"Content-Type":"application/json; charset=UTF-8","X-Upload-Content-Length":String(size),"X-Upload-Content-Type":mimeType},
+      body:JSON.stringify(metadata)
+    });
+    if (!init.ok) throw new Error("YouTube upload initialization failed ("+init.status+"): "+(await init.text()).slice(0,500));
+    const uploadUrl = init.headers.get("location");
+    if (!uploadUrl) throw new Error("YouTube did not return a resumable upload URL.");
+    const bytes = await object.arrayBuffer();
+    if (bytes.byteLength !== size) throw new Error("Render file size changed while preparing upload.");
+    const uploaded = await fetch(uploadUrl,{method:"PUT",headers:{"Content-Type":mimeType,"Content-Length":String(size)},body:bytes});
+    const result = await uploaded.json().catch(()=>({}));
+    if (!uploaded.ok || !result.id) throw new Error("YouTube video upload failed ("+uploaded.status+"): "+JSON.stringify(result.error || result).slice(0,500));
+    const completedAt = new Date().toISOString();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE publishing_jobs SET status='published',platform_video_id=?,platform_url=?,last_error=NULL,updated_at=? WHERE id=? AND status='uploading'").bind(result.id,"https://www.youtube.com/shorts/"+result.id,completedAt,job.id),
+      env.DB.prepare("UPDATE clips SET status='published',updated_at=? WHERE id=?").bind(completedAt,job.clip_id),
+      env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) SELECT ?,c.workspace_id,'clip',c.id,'youtube.published',?,? FROM clips c WHERE c.id=?").bind(crypto.randomUUID(),JSON.stringify({jobId:job.id,videoId:result.id,renderAssetId:job.render_asset_id}),completedAt,job.clip_id)
+    ]);
+  } catch (error) {
+    const message=String(error?.message || "YouTube upload failed.").slice(0,1000);
+    await env.DB.prepare("UPDATE publishing_jobs SET status='failed',last_error=?,updated_at=? WHERE id=? AND status='uploading'").bind(message,new Date().toISOString(),job.id).run();
+    console.error("youtube_upload_failed",job.id,message);
+  }
+}
+
 const json = (data, status = 200) => Response.json(data, {
   status,
   headers: { "Cache-Control": "no-store" }
@@ -421,6 +504,6 @@ export default {
   },
 
   async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(processNextJob(env));
+    ctx.waitUntil(Promise.all([processNextJob(env), processYoutubeJob(env)]));
   }
 };
