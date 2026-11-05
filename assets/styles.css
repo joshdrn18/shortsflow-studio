@@ -64,3 +64,13 @@
 .clip-preview-dialog>p{font-size:10px;color:var(--muted);margin:12px 2px 5px;min-height:14px}
 .clip-preview-note{display:block;color:#858b9b;font-size:9px;line-height:1.5}
 @media(max-width:600px){.clip-preview-dialog{padding:12px}.clip-trim-controls{grid-template-columns:1fr 1fr}.clip-trim-controls button{grid-column:1/-1}}
+
+.clip-metadata-editor{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-top:16px}
+.clip-metadata-editor label{display:grid;gap:6px;font-size:10px;color:#aeb3c0}
+.clip-metadata-editor label:nth-child(2){grid-column:1/-1}
+.clip-metadata-editor input,.clip-metadata-editor textarea{width:100%;min-width:0;box-sizing:border-box;background:#0d0f14;border:1px solid #303541;border-radius:7px;color:#eee;padding:10px;font:11px "DM Sans",sans-serif;resize:vertical}
+.clip-metadata-editor input{height:38px}
+.clip-editor-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:13px}
+.clip-editor-footer>p{font-size:10px;color:var(--muted);min-height:14px}
+.clip-editor-footer button:disabled{opacity:.55;cursor:wait}
+@media(max-width:600px){.clip-metadata-editor{grid-template-columns:1fr}.clip-metadata-editor label:nth-child(2){grid-column:auto}.clip-editor-footer{align-items:stretch;flex-direction:column}.clip-editor-footer button{width:100%}}
