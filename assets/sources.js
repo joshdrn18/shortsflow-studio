@@ -9,7 +9,7 @@
     if ($("#sources-workspace")) return;
     const panel=document.createElement("section");
     panel.id="sources-workspace"; panel.className="sources-workspace hidden";
-    panel.innerHTML='<section class="source-intake"><div class="source-intake-copy"><span class="source-kicker">SOURCE LIBRARY</span><h2>Bring your footage in.</h2><p>Upload original videos to your private workspace. ShortsFlow will transcribe and discover the strongest moments.</p><div class="source-specs"><span> <i></i> Private R2 storage</span><span>Up to 90 MB</span><span>MP4 analysis · 10 min max</span></div></div><div class="source-dropzone" id="source-dropzone" tabindex="0" role="button" aria-label="Choose a video to upload"><div class="source-upload-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 16.5v2A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><strong>Drop a video here</strong><span>or choose a file from your device</span><button class="primary-button" type="button" id="choose-source-btn">Browse videos <span>↗</span></button><small>MP4, MOV, WebM or MKV · 90 MB maximum</small></div></section><div class="upload-progress hidden" id="upload-progress"><div class="progress-heading"><strong id="upload-filename">Uploading video</strong><span id="upload-percent">0%</span></div><div class="progress-track"><i id="upload-progress-bar"></i></div><p id="upload-status">Preparing secure upload…</p></div><section class="source-queue-section"><div class="source-section-heading"><div><span class="source-kicker">BACKGROUND WORK</span><h3>Processing queue</h3><p>Track transcription and AI clip discovery jobs.</p></div><button class="text-button" id="refresh-jobs-btn">↻ Refresh</button></div><div id="jobs-list" class="jobs-list"></div></section><section class="source-library-section"><div class="source-section-heading"><div><span class="source-kicker">YOUR ASSETS</span><h3>Source videos <span id="source-count" class="source-count">0</span></h3><p>Original files stored privately in your workspace.</p></div><button class="text-button" id="refresh-sources-btn">↻ Refresh</button></div><div id="sources-list" class="sources-list"></div></section><dialog id="source-preview-dialog" class="source-preview-dialog"><div class="source-preview-head"><div><strong id="source-preview-title">Video preview</strong><small>Private workspace preview</small></div><button type="button" id="source-preview-close" class="text-button">Close ✕</button></div><video id="source-preview-video" controls playsinline preload="metadata"></video><p id="source-preview-message" role="status">Loading preview…</p></dialog>';
+    panel.innerHTML='<section class="source-intake"><div class="source-intake-copy"><span class="source-kicker">SOURCE LIBRARY</span><h2>Bring your footage in.</h2><p>Upload original videos to your private workspace. ShortsFlow will transcribe and discover the strongest moments.</p><div class="source-specs"><span> <i></i> Private R2 storage</span><span>Up to 200 MB</span><span>MP4 analysis · 30 min max</span></div></div><div class="source-dropzone" id="source-dropzone" tabindex="0" role="button" aria-label="Choose a video to upload"><div class="source-upload-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 16.5v2A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><strong>Drop a video here</strong><span>or choose a file from your device</span><button class="primary-button" type="button" id="choose-source-btn">Browse videos <span>↗</span></button><small>MP4, MOV, WebM or MKV · 200 MB maximum</small></div></section><div class="upload-progress hidden" id="upload-progress"><div class="progress-heading"><strong id="upload-filename">Uploading video</strong><span id="upload-percent">0%</span></div><div class="progress-track"><i id="upload-progress-bar"></i></div><p id="upload-status">Preparing secure upload…</p></div><section class="source-queue-section"><div class="source-section-heading"><div><span class="source-kicker">BACKGROUND WORK</span><h3>Processing queue</h3><p>Track transcription and AI clip discovery jobs.</p></div><button class="text-button" id="refresh-jobs-btn">↻ Refresh</button></div><div id="jobs-list" class="jobs-list"></div></section><section class="source-library-section"><div class="source-section-heading"><div><span class="source-kicker">YOUR ASSETS</span><h3>Source videos <span id="source-count" class="source-count">0</span></h3><p>Original files stored privately in your workspace.</p></div><button class="text-button" id="refresh-sources-btn">↻ Refresh</button></div><div id="sources-list" class="sources-list"></div></section><dialog id="source-preview-dialog" class="source-preview-dialog"><div class="source-preview-head"><div><strong id="source-preview-title">Video preview</strong><small>Private workspace preview</small></div><button type="button" id="source-preview-close" class="text-button">Close ✕</button></div><video id="source-preview-video" controls playsinline preload="metadata"></video><p id="source-preview-message" role="status">Loading preview…</p></dialog>';
     panel.insertAdjacentHTML("beforeend", '<dialog id="source-transcript-dialog" class="source-preview-dialog"><div class="source-preview-head"><div><strong id="source-transcript-title">Transcript</strong><small id="source-transcript-meta">AI-generated transcript</small></div><div class="source-row-actions"><button type="button" id="source-transcript-vtt" class="text-button">Download VTT</button><button type="button" id="source-transcript-close" class="text-button">Close ✕</button></div></div><pre id="source-transcript-text" class="source-transcript-text"></pre></dialog>');
     $(".page-heading").after(panel);
     $("#choose-source-btn").addEventListener("click",()=>$("#source-file").click());
@@ -104,15 +104,50 @@
   }
   async function upload(file) {
     if(!allowed.has(file.type)){alert("Unsupported format. Use MP4, MOV, WebM, MKV or OGG.");return;}
-    if(file.size>90*1024*1024){alert("This upload currently supports files up to 90 MB.");return;}
+    if(file.size>200*1024*1024){alert("This upload currently supports files up to 200 MB.");return;}
     const box=$("#upload-progress"),bar=$("#upload-progress-bar"),pct=$("#upload-percent"),status=$("#upload-status");
     box.classList.remove("hidden");$("#upload-filename").textContent=file.name;bar.style.width="0%";pct.textContent="0%";status.textContent="Reading video metadata…";status.classList.remove("error-text");
     const durationSeconds=await readVideoDuration(file);
-    status.textContent="Uploading securely to private R2 storage…";
-    const xhr=new XMLHttpRequest();xhr.open("POST","/api/sources/upload");xhr.setRequestHeader("Content-Type",file.type);xhr.setRequestHeader("X-File-Name",encodeURIComponent(file.name));if(durationSeconds)xhr.setRequestHeader("X-Video-Duration",String(durationSeconds));
-    xhr.upload.onprogress=e=>{if(!e.lengthComputable)return;const p=Math.round(e.loaded/e.total*100);bar.style.width=p+"%";pct.textContent=p+"%";status.textContent=p===100?"Saving video record…":"Uploading · "+bytes(e.loaded)+" of "+bytes(e.total);};
-    xhr.onload=async()=>{let d={};try{d=JSON.parse(xhr.responseText);}catch{}if(xhr.status<200||xhr.status>=300||!d.ok){status.textContent=d.error||"Upload failed.";status.classList.add("error-text");return;}bar.style.width="100%";pct.textContent="100%";status.textContent="Saved to private storage.";await load();fetch("/api/workspace/summary").then(r=>r.json()).then(d=>{if(d.ok&&d.stats)$("#stat-sources").textContent=d.stats.sources;}).catch(()=>{});};
-    xhr.onerror=()=>{status.textContent="Network error. Upload status is unknown; refresh the source list before retrying.";status.classList.add("error-text");};xhr.send(file);
+    const chunkSize=8*1024*1024;
+    let uploadedBytes=0;
+    try {
+      status.textContent="Preparing secure multipart upload…";
+      const initResponse=await fetch("/api/sources/multipart",{method:"POST",headers:{"Content-Type":"application/json","X-Multipart-Action":"init"},body:JSON.stringify({filename:file.name,mimeType:file.type,sizeBytes:file.size})});
+      const init=await initResponse.json();
+      if(!initResponse.ok||!init.ok)throw new Error(init.error||"Could not initialize upload.");
+      const parts=[];
+      const totalParts=Math.ceil(file.size/chunkSize);
+      for(let index=0;index<totalParts;index++){
+        const partNumber=index+1;
+        const chunk=file.slice(index*chunkSize,Math.min(file.size,(index+1)*chunkSize));
+        status.textContent="Uploading part "+partNumber+" of "+totalParts+"…";
+        const response=await fetch("/api/sources/multipart",{
+          method:"POST",
+          headers:{"X-Multipart-Action":"part","X-Upload-Key":init.key,"X-Upload-Id":init.uploadId,"X-Part-Number":String(partNumber)},
+          body:chunk
+        });
+        const result=await response.json();
+        if(!response.ok||!result.ok)throw new Error(result.error||"Upload part "+partNumber+" failed.");
+        parts.push({partNumber,etag:result.etag});
+        uploadedBytes+=chunk.size;
+        const progress=Math.round(uploadedBytes/file.size*100);
+        bar.style.width=progress+"%";pct.textContent=progress+"%";
+      }
+      status.textContent="Finalizing private R2 upload…";
+      const completeResponse=await fetch("/api/sources/multipart",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","X-Multipart-Action":"complete","X-Upload-Key":init.key,"X-Upload-Id":init.uploadId},
+        body:JSON.stringify({filename:file.name,mimeType:file.type,sizeBytes:file.size,durationSeconds,parts})
+      });
+      const complete=await completeResponse.json();
+      if(!completeResponse.ok||!complete.ok)throw new Error(complete.error||"Could not finalize upload.");
+      bar.style.width="100%";pct.textContent="100%";status.textContent="Saved to private storage.";
+      await load();
+      fetch("/api/workspace/summary").then(r=>r.json()).then(d=>{if(d.ok&&d.stats)$("#stat-sources").textContent=d.stats.sources;}).catch(()=>{});
+    } catch(error){
+      status.textContent=error.message||"Upload failed. Retry the upload.";
+      status.classList.add("error-text");
+    }
   }
   document.addEventListener("DOMContentLoaded",()=>{
     ensurePanel();
