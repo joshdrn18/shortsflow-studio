@@ -33,7 +33,7 @@ export async function onRequestPost({ request, env }) {
       "SELECT id, title, status FROM source_videos WHERE id = ? AND workspace_id = ?"
     ).bind(body.sourceId, user.workspace.id).first();
     if (!source) return json({ ok: false, error: "Source video was not found in this workspace." }, 404);
-    if (!["uploaded", "ready", "failed"].includes(source.status)) return json({ ok: false, error: "This source is not ready for analysis." }, 409);
+    if (!["uploaded", "analyzing", "ready", "failed"].includes(source.status)) return json({ ok: false, error: "This source is not ready for analysis." }, 409);
     const active = await env.DB.prepare(
       `SELECT id, status FROM processing_jobs WHERE workspace_id = ? AND source_video_id = ? AND job_type = ?
        AND status IN ('queued','claimed','running') ORDER BY created_at DESC LIMIT 1`
