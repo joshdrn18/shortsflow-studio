@@ -40,7 +40,8 @@ Heavy video processing will not run inside request-bound Pages Functions. A sepa
 - Workspace-scoped source-video listing and private streaming preview API with HTTP byte-range support
 - Source preview player in the Sources workspace
 - Persistent, workspace-scoped processing job queue for source-analysis requests, with safe cancellation of queued jobs and manual retry of failed jobs
-- Scheduled analysis Worker using Cloudflare Media Transformations (beta) to extract audio from private R2 MP4 sources and Workers AI Whisper to create timestamped transcripts
+- Scheduled analysis Worker using Cloudflare Media Transformations (beta) to extract audio from private R2 MP4 sources, Workers AI Whisper for timestamped transcription, and an 8B instruction model to rank clip candidates
+- Workspace-scoped Clip Discovery API and candidate list with AI score, hook, transcript excerpt, timestamps, caption and hashtags
 - Secure workspace-scoped transcript viewer with timestamped WebVTT export
 - Versioned source-transcript storage and a daily app-level safety budget capped at 8,000 estimated Whisper Neurons
 - Workspace watermark settings API and 9:16 preview controls
@@ -64,7 +65,7 @@ Apply D1 migrations in order from the repository root:
 npx wrangler d1 migrations apply <DATABASE_NAME> --remote
 ```
 
-Wrangler reads the SQL files from `migrations/`. Apply migrations in order: `0001_initial.sql`, `0002_auth.sql`, `0003_workspace_settings.sql`, then `0004_processing_jobs.sql`, `0005_source_transcripts.sql`, and `0006_ai_usage_budget.sql`. Do not apply `database/schema.sql` as well; it is a reference copy of the original base schema. Bind the private R2 bucket to Pages Functions as `MEDIA`.
+Wrangler reads the SQL files from `migrations/`. Apply migrations in order: `0001_initial.sql`, `0002_auth.sql`, `0003_workspace_settings.sql`, then `0004_processing_jobs.sql`, `0005_source_transcripts.sql`, `0006_ai_usage_budget.sql`, and `0007_clip_discovery_idempotency.sql`. Do not apply `database/schema.sql` as well; it is a reference copy of the original base schema. Bind the private R2 bucket to Pages Functions as `MEDIA`.
 
 After binding D1 and applying migrations, deploy the Pages project and verify:
 
@@ -84,7 +85,7 @@ After binding D1 and applying migrations, deploy the Pages project and verify:
 
 ## Not implemented yet
 
-AI clip discovery and scoring, in-editor subtitle styling and word-highlighting UI, actual watermark burn-in, video rendering, Review Center actions, YouTube OAuth, publishing queue workers and analytics. Transcription is active for MP4 (H.264/AAC) sources up to 10 minutes and 90 MB; other uploaded formats remain available for private storage and preview but are not supported by the current analysis Worker. Source upload, private video streaming preview and watermark configuration are implemented. End-to-end browser verification with a real uploaded video is still pending.
+in-editor clip trimming, subtitle styling and word-highlighting UI, actual watermark burn-in, video rendering, Review Center actions, YouTube OAuth, publishing queue workers and analytics. Transcription is active for MP4 (H.264/AAC) sources up to 10 minutes and 90 MB; other uploaded formats remain available for private storage and preview but are not supported by the current analysis Worker. Source upload, private video streaming preview and watermark configuration are implemented. End-to-end browser verification with a real uploaded video is still pending.
 
 ## Analysis engine
 
