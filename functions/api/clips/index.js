@@ -64,7 +64,8 @@ export async function onRequestPatch({ request, env }) {
 
   try {
     const clip = await env.DB.prepare(
-      `SELECT c.id, c.start_seconds, c.end_seconds, s.duration_seconds
+      `SELECT c.id, c.start_seconds, c.end_seconds, s.duration_seconds,
+              COALESCE((SELECT m.subtitle_config_json FROM clip_metadata m WHERE m.clip_id = c.id ORDER BY m.version DESC LIMIT 1), '{}') AS subtitle_config_json
        FROM clips c JOIN source_videos s ON s.id = c.source_video_id
        WHERE c.id = ? AND c.workspace_id = ?`
     ).bind(clipId, user.workspace.id).first();
@@ -83,9 +84,9 @@ export async function onRequestPatch({ request, env }) {
         "UPDATE clips SET start_seconds = ?, end_seconds = ?, title = ?, status = 'editing', updated_at = ? WHERE id = ? AND workspace_id = ?"
       ).bind(start, end, title, now, clipId, user.workspace.id),
       env.DB.prepare(
-        `INSERT INTO clip_metadata (id, clip_id, version, title, caption, hashtags, language, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(crypto.randomUUID(), clipId, version, title, caption, hashtags, language, now),
+        `INSERT INTO clip_metadata (id, clip_id, version, title, caption, hashtags, language, subtitle_config_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(crypto.randomUUID(), clipId, version, title, caption, hashtags, language, clip.subtitle_config_json || "{}", now),
       env.DB.prepare(
         `INSERT INTO activity_logs (id, workspace_id, entity_type, entity_id, event, details, created_at)
          VALUES (?, ?, 'clip', ?, 'clip_edited', ?, ?)`
