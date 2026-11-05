@@ -25,6 +25,7 @@
       list.innerHTML=d.sources.map(s=>'<article class="source-row"><div class="source-file-icon">▶</div><div class="source-file-info"><strong>'+esc(s.title)+'</strong><small>'+bytes(s.sizeBytes)+' · '+esc(s.mimeType||"video")+' · '+esc(formatDuration(s.durationSeconds))+' · '+esc(new Date(s.createdAt).toLocaleString())+'</small></div><span class="source-status">'+esc(s.status)+'</span><div class="source-row-actions"><button type="button" class="text-button preview-source-btn" data-source-id="'+esc(s.id)+'" data-source-title="'+esc(s.title)+'">Preview</button><button type="button" class="text-button queue-source-btn" data-source-id="'+esc(s.id)+'">Queue analysis</button><button type="button" class="text-button view-transcript-btn" data-source-id="'+esc(s.id)+'" '+(s.transcriptStatus==="completed"?"":"disabled")+'>Transcript</button></div></article>').join("");
       list.querySelectorAll(".queue-source-btn").forEach(btn=>btn.addEventListener("click",()=>queueSource(btn.dataset.sourceId,btn)));
       list.querySelectorAll(".preview-source-btn").forEach(btn=>btn.addEventListener("click",()=>openPreview(btn.dataset.sourceId,btn.dataset.sourceTitle)));
+      list.querySelectorAll(".view-transcript-btn").forEach(btn=>btn.addEventListener("click",()=>openTranscript(btn.dataset.sourceId,btn.closest(".source-row")?.querySelector(".source-file-info strong")?.textContent)));
       await loadJobs();
     } catch(e){list.innerHTML='<div class="sources-empty error"><b>Could not load sources</b><p>'+esc(e.message)+'</p></div>';}
   }
@@ -44,6 +45,27 @@
     video.onloadedmetadata=()=>{message.textContent=video.duration ? "Duration: "+Math.floor(video.duration/60)+":"+String(Math.floor(video.duration%60)).padStart(2,"0") : "Preview ready.";};
     if(typeof dialog.showModal==="function") dialog.showModal();
     else dialog.setAttribute("open","");
+  }
+  function buildTranscriptVtt(words) {
+    const valid=(Array.isArray(words)?words:[]).filter(w=>w.word&&Number.isFinite(Number(w.start))&&Number.isFinite(Number(w.end)));
+    const cues=[];let group=[];
+    for(const word of valid){group.push(word);if(group.length>=7||Number(word.end)-Number(group[0].start)>=3.5){cues.push(group);group=[];}}
+    if(group.length)cues.push(group);
+    const stamp=value=>{const ms=Math.max(0,Math.round(Number(value)*1000));const h=Math.floor(ms/3600000),m=Math.floor(ms%3600000/60000),s=Math.floor(ms%60000/1000),r=ms%1000;return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0")+"."+String(r).padStart(3,"0");};
+    return ["WEBVTT","",...cues.map((cue,i)=>(i+1)+"\\n"+stamp(cue[0].start)+" --> "+stamp(cue[cue.length-1].end)+"\\n"+cue.map(w=>w.word).join(" ").trim()),""].join("\\n");
+  }
+  let activeTranscriptVtt="";
+  async function openTranscript(sourceId,title) {
+    const dialog=$("#source-transcript-dialog"),text=$("#source-transcript-text"),meta=$("#source-transcript-meta");
+    text.textContent="Loading transcript…";meta.textContent="Fetching private transcript";$("#source-transcript-title").textContent=title||"Transcript";
+    try {
+      const r=await fetch("/api/sources/"+encodeURIComponent(sourceId)+"/transcript",{headers:{accept:"application/json"}});
+      const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"Could not load transcript.");
+      const t=d.transcript;text.textContent=t.text||"No speech detected.";
+      meta.textContent="Version "+t.version+" · "+Number(t.wordCount||0).toLocaleString()+" timestamped words · "+(t.model||"Whisper");
+      activeTranscriptVtt=buildTranscriptVtt(t.words);
+      dialog.showModal();
+    } catch(e){text.textContent=e.message;meta.textContent="Transcript unavailable";activeTranscriptVtt="";dialog.showModal();}
   }
   async function loadJobs() {
     const list=$("#jobs-list"); if(!list) return;
@@ -91,6 +113,9 @@
     setInterval(()=>{const panel=$("#sources-workspace");if(panel&&!panel.classList.contains("hidden"))loadJobs();},15000);
     $("#source-preview-close").addEventListener("click",()=>{const dialog=$("#source-preview-dialog");$("#source-preview-video").pause();$("#source-preview-video").removeAttribute("src");$("#source-preview-video").load();if(dialog.close)dialog.close();else dialog.removeAttribute("open");});
     $("#source-preview-dialog").addEventListener("click",event=>{if(event.target.id==="source-preview-dialog")$("#source-preview-close").click();});
+    $("#source-transcript-close").addEventListener("click",()=>$("#source-transcript-dialog").close());
+    $("#source-transcript-vtt").addEventListener("click",()=>{if(!activeTranscriptVtt)return;const blob=new Blob([activeTranscriptVtt],{type:"text/vtt;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="shortsflow-transcript.vtt";a.click();URL.revokeObjectURL(url);});
+
     input.addEventListener("change",e=>{const f=e.target.files&&e.target.files[0];if(f)upload(f);e.target.value="";});
     document.addEventListener("shortsflow:view", event => {
       if (event.detail?.view !== "sources") return;
