@@ -103,6 +103,45 @@ function parsePayload(value) {
   }
 }
 
+
+function parseClipSelectorResponse(result) {
+  const values = [result && result.response, result && result.result, result && result.text, result && result.output];
+  for (const value of values) {
+    if (value && typeof value === 'object') {
+      if (Array.isArray(value.candidates)) return value.candidates;
+      if (Array.isArray(value)) return value;
+    }
+    let raw = String(value || '').trim();
+    if (!raw) continue;
+    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const first = raw.indexOf('{'), last = raw.lastIndexOf('}');
+    if (first >= 0 && last > first) {
+      try {
+        const parsed = JSON.parse(raw.slice(first, last + 1).replace(/,\s*([}\]])/g, '$1'));
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed && Array.isArray(parsed.candidates)) return parsed.candidates;
+      } catch (error) {}
+    }
+    const marker = raw.indexOf('"candidates"');
+    const arrayStart = marker >= 0 ? raw.indexOf('[', marker) : -1;
+    if (arrayStart >= 0) {
+      const recovered = []; let depth = 0, objectStart = -1, quoted = false, escaped = false;
+      for (let i = arrayStart + 1; i < raw.length; i++) {
+        const ch = raw[i];
+        if (quoted) { if (escaped) escaped = false; else if (ch === '\\') escaped = true; else if (ch === '"') quoted = false; continue; }
+        if (ch === '"') quoted = true;
+        else if (ch === '{') { if (depth === 0) objectStart = i; depth++; }
+        else if (ch === '}') { depth--; if (depth === 0 && objectStart >= 0) {
+          try { recovered.push(JSON.parse(raw.slice(objectStart, i + 1))); } catch (error) {}
+          objectStart = -1;
+        } }
+        else if (ch === ']' && depth === 0) break;
+      }
+      if (recovered.length) return recovered;
+    }
+  }
+  return null;
+}
 async function claimJob(env) {
   const now = new Date();
   const nowIso = now.toISOString();
@@ -357,7 +396,7 @@ async function processClipDiscovery(env, job) {
   const prompt = "Select 5 to 15 distinct short-form clip candidates from this transcript. Each clip must be 15 to 60 seconds, have a strong opening hook, make sense without extra context, and end on a complete thought or payoff. Prefer useful, surprising, emotional, funny, story-driven, or high-retention moments. Avoid long pauses, greetings, repeated content, and clips that need missing context. Choose startSeconds and endSeconds from the supplied word timestamps, not guesses. Do not make candidates overlap substantially. Rank the strongest first. Return this exact JSON shape: {\"candidates\":[{\"startSeconds\":12.3,\"endSeconds\":42.8,\"title\":\"Short title\",\"hook\":\"Opening hook\",\"reason\":\"Why this moment works\",\"caption\":\"Short social caption\",\"hashtags\":[\"#shorts\",\"#topic\"],\"score\":91}]}. Source duration: " + duration.toFixed(2) + " seconds. Transcript language: " + (transcript.language || "auto-detected") + ". Timestamped transcript: " + timeline;
 
   const estimatedInputTokens = Math.ceil((system.length + prompt.length) / 3);
-  const withinBudget = await reserveTextBudget(env, estimatedInputTokens, 2400);
+  const withinBudget = await reserveTextBudget(env, estimatedInputTokens, 4400);
   if (!withinBudget) {
     const nextUtcDay = new Date();
     nextUtcDay.setUTCHours(24, 0, 5, 0);
@@ -367,22 +406,26 @@ async function processClipDiscovery(env, job) {
     return;
   }
 
-  const result = await env.AI.run(CLIP_MODEL, {
+  const runClipSelector = (userPrompt, tokenLimit) => env.AI.run(CLIP_MODEL, {
     messages: [
-      { role: "system", content: system },
-      { role: "user", content: prompt }
+      { role: 'system', content: system },
+      { role: 'user', content: userPrompt }
     ],
-    max_tokens: 2400,
-    temperature: 0.15,
-    response_format: { type: "json_object" }
+    max_tokens: tokenLimit,
+    temperature: 0.1,
+    response_format: { type: 'json_object' }
   });
 
-  let raw = String(result?.response || result?.result || result?.text || "").trim();
-  raw = raw.replace(/^\`\`\`(?:json)?\s*/i, "").replace(/\s*\`\`\`$/i, "");
-  let parsed;
-  try { parsed = JSON.parse(raw); } catch { throw new Error("AI clip selector returned invalid JSON. Retry discovery."); }
-  const candidates = Array.isArray(parsed) ? parsed : parsed?.candidates;
-  if (!Array.isArray(candidates)) throw new Error("AI clip selector did not return a candidate list.");
+  let result = await runClipSelector(prompt, 2400);
+  let candidates = parseClipSelectorResponse(result);
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    const retryPrompt = prompt + '\n\nIMPORTANT: Your previous response was not valid JSON. Return only a compact valid JSON object with a top-level candidates array. Include no markdown or explanation. Return at most 8 candidates and keep title, hook, reason and caption concise.';
+    result = await runClipSelector(retryPrompt, 2000);
+    candidates = parseClipSelectorResponse(result);
+  }
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    throw new Error('AI clip selector could not return valid candidate JSON after an automatic retry. Retry discovery.');
+  }
 
   const existingResult = await env.DB.prepare(
     "SELECT start_seconds, end_seconds FROM clips WHERE discovery_job_id = ?"
