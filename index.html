@@ -81,6 +81,23 @@
       </section>
     </main>
   </div>
+  <section class="auth-overlay hidden" id="auth-overlay" aria-labelledby="auth-title">
+    <div class="auth-card">
+      <a class="brand auth-brand" href="#"><span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.8 20 11.2a.9.9 0 0 1 0 1.6L7 20.2a.9.9 0 0 1-1.35-.78V4.58A.9.9 0 0 1 7 3.8Z" fill="currentColor"/></svg></span><span class="brand-copy"><strong>shortsflow</strong><small>STUDIO</small></span></a>
+      <div class="auth-eyebrow">YOUR PRIVATE CREATOR WORKSPACE</div>
+      <h2 id="auth-title">Welcome back.</h2>
+      <p class="auth-description" id="auth-description">Sign in to continue to your production workspace.</p>
+      <div class="auth-tabs"><button type="button" class="selected" id="auth-login-tab">Sign in</button><button type="button" id="auth-register-tab">Create account</button></div>
+      <form id="auth-form">
+        <label id="auth-name-field" class="hidden">Your name<input id="auth-name" name="displayName" autocomplete="name" maxlength="60" placeholder="Creator name"></label>
+        <label>Email address<input id="auth-email" name="email" type="email" autocomplete="email" required maxlength="254" placeholder="you@example.com"></label>
+        <label>Password<input id="auth-password" name="password" type="password" autocomplete="current-password" required minlength="10" maxlength="128" placeholder="At least 10 characters"></label>
+        <button class="primary-button auth-submit" id="auth-submit" type="submit">Sign in <span>→</span></button>
+      </form>
+      <p class="auth-message" id="auth-message" role="status"></p>
+      <p class="auth-footnote">Your videos and workspace data stay private to your account.</p>
+    </div>
+  </section>
   <input type="file" id="source-file" accept="video/*" hidden>
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
   <script src="/assets/app.js" defer></script>
