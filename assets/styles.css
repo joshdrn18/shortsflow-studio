@@ -28,3 +28,6 @@
 .job-row-actions .text-button{font-size:12px;padding:7px 10px;border:1px solid var(--line,#242733);border-radius:8px}
 .job-row-actions .text-button:disabled{opacity:.55;cursor:wait}
 @media(max-width:680px){.job-row-actions{width:100%;margin-left:52px}}
+
+.source-transcript-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:min(65vh,680px);overflow:auto;padding:18px;margin:0;border:1px solid var(--line,#242733);border-radius:12px;background:var(--panel,#101218);color:var(--text,#f2f3f6);font:14px/1.8 ui-monospace,SFMono-Regular,Menlo,monospace}
+.view-transcript-btn:disabled{opacity:.35;cursor:not-allowed}
