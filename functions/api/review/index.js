@@ -39,11 +39,11 @@ export async function onRequestPost({request,env}){
   const reviewId=crypto.randomUUID(),now=new Date().toISOString();
   const status=decision==="approved"?"approved":decision==="rejected"?"rejected":"editing";
   const results=await env.DB.batch([
-   env.DB.prepare("INSERT INTO clip_reviews (id,clip_id,asset_version,metadata_version,render_asset_id,decision,notes,reviewed_at) VALUES (?,?,?,?,?,?,?,?)").bind(reviewId,clipId,current.asset_version,current.metadata_version,assetId,decision,notes,now),
+   env.DB.prepare("INSERT INTO clip_reviews (id,clip_id,asset_version,metadata_version,render_asset_id,decision,notes,reviewed_at) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM clips c JOIN clip_metadata m ON m.clip_id=c.id AND m.version=(SELECT MAX(version) FROM clip_metadata WHERE clip_id=c.id) JOIN clip_assets a ON a.clip_id=c.id AND a.asset_type='render' AND a.id=? AND a.metadata_version=m.version AND a.version=(SELECT MAX(version) FROM clip_assets WHERE clip_id=c.id AND asset_type='render') WHERE c.id=? AND c.workspace_id=?)").bind(reviewId,clipId,current.asset_version,current.metadata_version,assetId,decision,notes,now,assetId,clipId,user.workspace.id),
    env.DB.prepare("UPDATE clips SET status=?,updated_at=? WHERE id=? AND workspace_id=? AND (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=? AND EXISTS (SELECT 1 FROM clip_assets WHERE id=? AND clip_id=? AND metadata_version=?)").bind(status,now,clipId,user.workspace.id,clipId,current.metadata_version,assetId,clipId,current.metadata_version),
    env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(),user.workspace.id,"clip",clipId,"clip_review_"+decision,JSON.stringify({reviewId,assetId,assetVersion:current.asset_version,metadataVersion:current.metadata_version}),now)
   ]);
-  if(Number(results[1]?.meta?.changes||0)!==1)return json({ok:false,error:"The clip changed while saving this review. Refresh and try again."},409);
+  if(Number(results[0]?.meta?.changes||0)!==1||Number(results[1]?.meta?.changes||0)!==1)return json({ok:false,error:"The clip changed while saving this review. Refresh and try again."},409);
   return json({ok:true,review:{id:reviewId,clipId,assetId,assetVersion:Number(current.asset_version),metadataVersion:Number(current.metadata_version),decision,notes,reviewedAt:now}},201);
  }catch(e){console.error("review_decision_failed",e);return json({ok:false,error:"Could not save review decision."},500);}
 }
