@@ -23,17 +23,20 @@ export async function onRequestPost({request,env,params}){
  const id=String(params?.clipId||"");if(!ID.test(id))return json({ok:false,error:"Invalid clip ID."},400);
  if((request.headers.get("Content-Type")||"").split(";")[0].trim().toLowerCase()!=="video/webm")return json({ok:false,error:"Only WebM render output is accepted in this browser-rendering version."},415);
  const mv=Number(request.headers.get("X-Metadata-Version"));if(!Number.isSafeInteger(mv)||mv<1)return json({ok:false,error:"Render metadata version is missing."},400);
- if(Number(request.headers.get("Content-Length")||0)>MAX)return json({ok:false,error:"Rendered file exceeds the 90 MB storage limit."},413);
+ const declaredSize=Number(request.headers.get("Content-Length")||0);
+ if(!Number.isSafeInteger(declaredSize)||declaredSize<1024)return json({ok:false,error:"A valid Content-Length is required for secure R2 streaming."},411);
+ if(declaredSize>MAX)return json({ok:false,error:"Rendered file exceeds the 90 MB storage limit."},413);
  if(!request.body)return json({ok:false,error:"Rendered file is empty."},400);
  let key=null;
  try{
   const clip=await env.DB.prepare(`SELECT c.id,m.version AS metadata_version FROM clips c LEFT JOIN clip_metadata m ON m.clip_id=c.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=c.id) WHERE c.id=? AND c.workspace_id=?`).bind(id,user.workspace.id).first();
   if(!clip)return json({ok:false,error:"Clip not found in this workspace."},404);
   if(Number(clip.metadata_version)!==mv)return json({ok:false,error:"Clip settings changed. Refresh the editor and render the latest version."},409);
-  let size=0;const limited=request.body.pipeThrough(new TransformStream({transform(chunk,controller){size+=chunk.byteLength;if(size>MAX)throw new Error("Rendered file exceeds the 90 MB storage limit.");controller.enqueue(chunk);}}));
+  const size=declaredSize,fixed=new FixedLengthStream(size);
   const assetId=crypto.randomUUID();key=`workspaces/${user.workspace.id}/clips/${id}/renders/${assetId}.webm`;
-  await env.MEDIA.put(key,limited,{httpMetadata:{contentType:"video/webm"},customMetadata:{workspaceId:user.workspace.id,clipId:id,metadataVersion:String(mv),assetId}});
-  if(size<1024)throw new Error("Rendered file is empty or incomplete.");
+  const pipePromise=request.body.pipeTo(fixed.writable);
+  const putPromise=env.MEDIA.put(key,fixed.readable,{httpMetadata:{contentType:"video/webm"},customMetadata:{workspaceId:user.workspace.id,clipId:id,metadataVersion:String(mv),assetId}});
+  await Promise.all([pipePromise,putPromise]);
   const latest=await env.DB.prepare("SELECT COALESCE(MAX(version),0) AS version FROM clip_assets WHERE clip_id=? AND asset_type='render'").bind(id).first();
   const version=Number(latest?.version||0)+1,now=new Date().toISOString();
   const saved = await env.DB.batch([
