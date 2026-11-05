@@ -39,7 +39,7 @@ Heavy video processing will not run inside request-bound Pages Functions. A sepa
 - Authenticated source-video upload to private R2 (MP4, MOV, WebM, MKV, OGG; 90 MB endpoint limit)
 - Workspace-scoped source-video listing and private streaming preview API with HTTP byte-range support
 - Source preview player in the Sources workspace
-- Persistent, workspace-scoped processing job queue for source-analysis requests (queue storage only; no worker consumes jobs yet)
+- Persistent, workspace-scoped processing job queue for source-analysis requests, with safe cancellation of queued jobs and manual retry of failed jobs (queue storage only; no worker consumes jobs yet)
 - Workspace watermark settings API and 9:16 preview controls
 
 The dashboard does not pretend that upload, AI processing, rendering, or YouTube publishing is active before those services are configured.
