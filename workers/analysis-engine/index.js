@@ -426,7 +426,7 @@ async function processClipDiscovery(env, job) {
         parsed = parseClipSelectorResponse(result);
       }
     }
-    if (Array.isArray(parsed)) candidates.push(...parsed);
+    if (Array.isArray(parsed)) candidates.push(...parsed.map(candidate => ({ ...candidate, __windowStart: window.from, __windowEnd: window.to })));
   }
   if (!candidates.length) {
     throw new Error("AI clip selector could not find valid candidates in the transcript windows. Retry discovery.");
@@ -450,9 +450,17 @@ async function processClipDiscovery(env, job) {
   for (const item of ranked) {
     if (accepted.length + existing.length >= 15) break;
     const candidate = item.candidate;
-    const rawStart = Number(candidate.startSeconds ?? candidate.start_seconds);
-    const rawEnd = Number(candidate.endSeconds ?? candidate.end_seconds);
+    let rawStart = Number(candidate.startSeconds ?? candidate.start_seconds);
+    let rawEnd = Number(candidate.endSeconds ?? candidate.end_seconds);
     if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) continue;
+    const windowStart = Number(candidate.__windowStart || 0);
+    const windowEnd = Number(candidate.__windowEnd || duration);
+    // Some model responses return timestamps relative to their supplied window.
+    // Convert those to the source timeline before validating against transcript words.
+    if (windowStart > 0 && rawStart < windowStart - 3 && rawEnd <= (windowEnd - windowStart) + 3) {
+      rawStart += windowStart;
+      rawEnd += windowStart;
+    }
     const startWord = nearest(rawStart, "start");
     const endWord = nearest(rawEnd, "end");
     const start = Number(startWord.start);
