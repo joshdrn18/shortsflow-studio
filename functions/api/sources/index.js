@@ -11,7 +11,7 @@ export async function onRequestGet({ request, env }) {
        FROM source_videos WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 100`
     ).bind(user.workspace.id).all();
     return json({ ok: true, sources: (result.results || []).map((row) => ({
-      id: row.id, title: row.title, mimeType: row.mime_type, sizeBytes: row.size_bytes,
+      id: row.id, title: row.title, mimeType: row.mime_type, sizeBytes: row.size_bytes, durationSeconds: row.duration_seconds,
       status: row.status, createdAt: row.created_at
     })) });
   } catch {
