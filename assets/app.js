@@ -22,18 +22,12 @@ function navigate(view) {
   $("#crumb").textContent = views[item][0];
   $("#page-title").textContent = views[item][0];
   $("#page-subtitle").textContent = views[item][1];
-  if (item !== "overview") toast(views[item][0] + " workspace is being prepared.");
   if (window.innerWidth <= 720) $("#sidebar").classList.remove("open");
 }
 navItems.forEach((button) => button.addEventListener("click", () => navigate(button.dataset.view)));
 $("#mobile-menu").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
 $("#add-source-btn").addEventListener("click", () => $("#source-file").click());
 $("#start-workflow").addEventListener("click", () => $("#source-file").click());
-$("#source-file").addEventListener("change", (event) => {
-  const file = event.target.files && event.target.files[0];
-  if (file) toast("Source selected: " + file.name + ". Upload processing will be enabled when storage is configured.");
-  event.target.value = "";
-});
 $("#view-activity").addEventListener("click", () => toast("No activity has been recorded yet."));
 let authMode = "login";
 function setAuthMode(mode) {
