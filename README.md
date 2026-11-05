@@ -40,10 +40,11 @@ Heavy video processing will not run inside request-bound Pages Functions. A sepa
 - Workspace-scoped source-video listing and private streaming preview API with HTTP byte-range support
 - Source preview player in the Sources workspace
 - Persistent, workspace-scoped processing job queue for source-analysis requests, with safe cancellation of queued jobs and manual retry of failed jobs (queue storage only; no worker consumes jobs yet)
-- Versioned source-transcript storage and a daily AI usage budget table to cap this app's estimated Whisper usage below the free daily allocation (transcription runtime not connected yet)
+- Scheduled analysis Worker using Cloudflare Media Transformations (beta) to extract audio from private R2 MP4 sources and Workers AI Whisper to create timestamped transcripts
+- Versioned source-transcript storage and a daily app-level safety budget capped at 8,000 estimated Whisper Neurons
 - Workspace watermark settings API and 9:16 preview controls
 
-The dashboard does not pretend that upload, AI processing, rendering, or YouTube publishing is active before those services are configured.
+The dashboard does not pretend that rendering or YouTube publishing is active before those services are configured. The transcription Worker is active on a one-minute cron schedule; it processes one 60-second audio chunk per invocation.
 
 ## Cloudflare Pages setup
 
@@ -82,4 +83,4 @@ After binding D1 and applying migrations, deploy the Pages project and verify:
 
 ## Not implemented yet
 
-AI clip discovery, transcript/subtitle generation, actual watermark burn-in, video rendering, Review Center actions, YouTube OAuth, publishing queue workers and analytics. The transcript table is storage groundwork only; no audio extraction or transcription job is running yet. Source upload, private video streaming preview and watermark configuration are implemented. End-to-end browser verification with a real uploaded video is still pending.
+AI clip discovery and scoring, subtitle generation and word-highlighting UI, actual watermark burn-in, video rendering, Review Center actions, YouTube OAuth, publishing queue workers and analytics. Transcription is active for MP4 (H.264/AAC) sources up to 10 minutes and 90 MB; other uploaded formats remain available for private storage and preview but are not supported by the current analysis Worker. Source upload, private video streaming preview and watermark configuration are implemented. End-to-end browser verification with a real uploaded video is still pending.\n\n## Analysis engine\n\nThe scheduled Worker `shortsflow-analysis-engine` runs every minute and uses the private R2 source binding, Cloudflare Media Transformations binding, and Workers AI Whisper. Media Transformations is currently in open beta; binding-based operations are not billed during the beta. Workers AI has a 10,000-Neuron daily free allocation; ShortsFlow reserves at most 8,000 estimated Whisper Neurons per UTC day for this app. The cap is an app-level safeguard, not a guarantee against usage from other Workers AI services on the same account. Sources must be MP4 with H.264 video and AAC/MP3 audio, under 100 MB and no longer than 10 minutes. Each cron invocation transcribes one 60-second chunk and persists progress in D1.\n
