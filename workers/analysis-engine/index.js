@@ -1,0 +1,264 @@
+const MODEL = "@cf/openai/whisper";
+const CHUNK_SECONDS = 60;
+const MAX_SOURCE_SECONDS = 600;
+const DAILY_NEURON_BUDGET = 8000;
+const NEURONS_PER_AUDIO_MINUTE = 41.14;
+const LOCK_SECONDS = 600;
+
+const json = (data, status = 200) => Response.json(data, {
+  status,
+  headers: { "Cache-Control": "no-store" }
+});
+
+function parsePayload(value) {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function claimJob(env) {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const lockUntil = new Date(now.getTime() + LOCK_SECONDS * 1000).toISOString();
+  const workerId = crypto.randomUUID();
+  return env.DB.prepare(
+    `UPDATE processing_jobs
+       SET status = 'running', locked_by = ?, locked_until = ?, updated_at = ?
+     WHERE id = (
+       SELECT id FROM processing_jobs
+       WHERE job_type = 'analyze_source'
+         AND status IN ('queued','running')
+         AND available_at <= ?
+         AND (locked_until IS NULL OR locked_until < ?)
+       ORDER BY created_at ASC
+       LIMIT 1
+     )
+       AND status IN ('queued','running')
+       AND (locked_until IS NULL OR locked_until < ?)
+     RETURNING *`
+  ).bind(workerId, lockUntil, nowIso, nowIso, nowIso, nowIso).first();
+}
+
+async function releaseJob(env, jobId, payload, message = null) {
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE processing_jobs
+       SET status = 'queued', payload_json = ?, available_at = ?, locked_until = NULL,
+           locked_by = NULL, updated_at = ?, last_error = ?
+     WHERE id = ? AND status = 'running'`
+  ).bind(JSON.stringify(payload), now, now, message, jobId).run();
+}
+
+async function failJob(env, job, transcriptId, message) {
+  const now = new Date().toISOString();
+  const safeMessage = String(message || "Analysis failed.").slice(0, 1000);
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE processing_jobs SET status = 'failed', attempts = attempts + 1,
+         last_error = ?, locked_until = NULL, locked_by = NULL, updated_at = ?,
+         completed_at = ? WHERE id = ?`
+    ).bind(safeMessage, now, now, job.id),
+    env.DB.prepare(
+      "UPDATE source_videos SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ? AND workspace_id = ?"
+    ).bind(safeMessage, now, job.source_video_id, job.workspace_id),
+    ...(transcriptId ? [env.DB.prepare(
+      "UPDATE source_transcripts SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ? AND workspace_id = ?"
+    ).bind(safeMessage, now, transcriptId, job.workspace_id)] : [])
+  ]);
+}
+
+async function reserveAiBudget(env, seconds) {
+  const usageDate = new Date().toISOString().slice(0, 10);
+  const neurons = (seconds / 60) * NEURONS_PER_AUDIO_MINUTE;
+  const result = await env.DB.prepare(
+    `INSERT INTO ai_usage_daily (usage_date, neurons_reserved, audio_seconds_reserved, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(usage_date) DO UPDATE SET
+       neurons_reserved = neurons_reserved + excluded.neurons_reserved,
+       audio_seconds_reserved = audio_seconds_reserved + excluded.audio_seconds_reserved,
+       updated_at = excluded.updated_at
+     WHERE neurons_reserved + excluded.neurons_reserved <= ?`
+  ).bind(usageDate, neurons, Math.ceil(seconds), new Date().toISOString(), DAILY_NEURON_BUDGET).run();
+  return Number(result.meta?.changes || 0) > 0;
+}
+
+async function ensureTranscript(env, job, payload) {
+  if (payload.transcriptId) {
+    const existing = await env.DB.prepare(
+      "SELECT id, transcript_text, segments_json FROM source_transcripts WHERE id = ? AND workspace_id = ? AND source_video_id = ?"
+    ).bind(payload.transcriptId, job.workspace_id, job.source_video_id).first();
+    if (existing) return existing;
+  }
+  const latest = await env.DB.prepare(
+    "SELECT COALESCE(MAX(version), 0) AS version FROM source_transcripts WHERE source_video_id = ?"
+  ).bind(job.source_video_id).first();
+  const version = Number(latest?.version || 0) + 1;
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO source_transcripts
+       (id, workspace_id, source_video_id, version, status, model, transcript_text, segments_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'processing', ?, '', '[]', ?, ?)`
+  ).bind(id, job.workspace_id, job.source_video_id, version, MODEL, now, now).run();
+  payload.transcriptId = id;
+  payload.chunkIndex = 0;
+  await env.DB.prepare("UPDATE processing_jobs SET payload_json = ? WHERE id = ?")
+    .bind(JSON.stringify(payload), job.id).run();
+  return { id, transcript_text: "", segments_json: "[]" };
+}
+
+async function processNextJob(env) {
+  if (!env.DB || !env.SOURCE_MEDIA || !env.MEDIA_TRANSFORM || !env.AI) return;
+  const job = await claimJob(env);
+  if (!job) return;
+
+  let payload = parsePayload(job.payload_json);
+  let transcriptId = payload.transcriptId || null;
+
+  try {
+    const source = await env.DB.prepare(
+      `SELECT id, storage_key, mime_type, size_bytes, duration_seconds
+       FROM source_videos WHERE id = ? AND workspace_id = ?`
+    ).bind(job.source_video_id, job.workspace_id).first();
+
+    if (!source) throw new Error("Source video no longer exists.");
+    if (source.mime_type !== "video/mp4") {
+      throw new Error("AI analysis currently requires an MP4 source. MOV, WebM and MKV can be stored, but are not supported by this analysis pipeline yet.");
+    }
+    const duration = Number(source.duration_seconds || 0);
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error("Video duration could not be read. Re-upload the source so ShortsFlow can capture its duration.");
+    }
+    if (duration > MAX_SOURCE_SECONDS) {
+      throw new Error("AI analysis currently supports videos up to 10 minutes.");
+    }
+    if (Number(source.size_bytes || 0) >= 100 * 1024 * 1024) {
+      throw new Error("Source exceeds the Media Transformations 100 MB input limit.");
+    }
+
+    const transcript = await ensureTranscript(env, job, payload);
+    transcriptId = transcript.id;
+    const chunkIndex = Math.max(0, Number(payload.chunkIndex || 0));
+    const startSeconds = chunkIndex * CHUNK_SECONDS;
+    const chunkDuration = Math.min(CHUNK_SECONDS, duration - startSeconds);
+
+    if (chunkDuration <= 0) {
+      await completeTranscript(env, job, payload, transcriptId);
+      return;
+    }
+
+    await env.DB.prepare(
+      "UPDATE source_videos SET status = 'analyzing', error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
+    ).bind(new Date().toISOString(), source.id, job.workspace_id).run();
+
+    const object = await env.SOURCE_MEDIA.get(source.storage_key);
+    if (!object) throw new Error("Original video is missing from private R2 storage.");
+
+    const extracted = await env.MEDIA_TRANSFORM.input(object.body).output({
+      mode: "audio",
+      time: startSeconds + "s",
+      duration: chunkDuration + "s",
+      format: "m4a"
+    }).response();
+
+    if (!extracted.ok) throw new Error("Audio extraction failed for this video. Check that it uses H.264 video and AAC or MP3 audio.");
+    const audioBytes = new Uint8Array(await extracted.arrayBuffer());
+    if (audioBytes.byteLength < 128) {
+      if (chunkIndex > 0) {
+        await completeTranscript(env, job, payload, transcriptId);
+        return;
+      }
+      throw new Error("No usable audio track was found in this source video.");
+    }
+
+    const withinBudget = await reserveAiBudget(env, chunkDuration);
+    if (!withinBudget) {
+      const nextUtcDay = new Date();
+      nextUtcDay.setUTCHours(24, 0, 5, 0);
+      await env.DB.prepare(
+        `UPDATE processing_jobs SET status = 'queued', available_at = ?, locked_until = NULL,
+           locked_by = NULL, last_error = ?, updated_at = ? WHERE id = ?`
+      ).bind(nextUtcDay.toISOString(), "Daily AI safety budget reached; this job will resume after the UTC reset.", new Date().toISOString(), job.id).run();
+      return;
+    }
+
+    const result = await env.AI.run(MODEL, { audio: Array.from(audioBytes) });
+    const current = await env.DB.prepare(
+      "SELECT transcript_text, segments_json FROM source_transcripts WHERE id = ? AND workspace_id = ?"
+    ).bind(transcriptId, job.workspace_id).first();
+    const priorText = String(current?.transcript_text || "");
+    const nextText = [priorText, String(result?.text || "").trim()].filter(Boolean).join(" ").slice(0, 250000);
+    let priorWords = [];
+    try { priorWords = JSON.parse(current?.segments_json || "[]"); } catch { priorWords = []; }
+    const words = Array.isArray(result?.words) ? result.words.map(word => ({
+      word: String(word.word || word.text || ""),
+      start: Number(word.start || 0) + startSeconds,
+      end: Number(word.end || word.start || 0) + startSeconds
+    })).filter(word => word.word && Number.isFinite(word.start) && Number.isFinite(word.end)) : [];
+    const nextWords = priorWords.concat(words).slice(0, 30000);
+    const now = new Date().toISOString();
+    const nextIndex = chunkIndex + 1;
+    const totalChunks = Math.ceil(duration / CHUNK_SECONDS);
+    payload = { ...payload, transcriptId, chunkIndex: nextIndex, totalChunks };
+
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE source_transcripts SET transcript_text = ?, segments_json = ?, status = 'processing', error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
+      ).bind(nextText, JSON.stringify(nextWords), now, transcriptId, job.workspace_id),
+      env.DB.prepare(
+        "UPDATE processing_jobs SET status = 'running', payload_json = ?, available_at = ?, locked_until = NULL, locked_by = NULL, last_error = NULL, updated_at = ? WHERE id = ?"
+      ).bind(JSON.stringify(payload), now, now, job.id)
+    ]);
+
+    if (nextIndex >= totalChunks) {
+      await completeTranscript(env, job, payload, transcriptId);
+    }
+  } catch (error) {
+    await failJob(env, job, transcriptId, error?.message || "Unexpected analysis error.");
+  }
+}
+
+async function completeTranscript(env, job, payload, transcriptId) {
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE source_transcripts SET status = 'completed', error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
+    ).bind(now, transcriptId, job.workspace_id),
+    env.DB.prepare(
+      "UPDATE source_videos SET status = 'ready', error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
+    ).bind(now, job.source_video_id, job.workspace_id),
+    env.DB.prepare(
+      "UPDATE processing_jobs SET status = 'succeeded', payload_json = ?, result_json = ?, completed_at = ?, updated_at = ?, locked_until = NULL, locked_by = NULL, last_error = NULL WHERE id = ?"
+    ).bind(JSON.stringify({ ...payload, transcriptId }), JSON.stringify({ transcriptId, stage: "transcription_complete" }), now, now, job.id),
+    env.DB.prepare(
+      "INSERT INTO activity_logs (id, workspace_id, entity_type, entity_id, event, details, created_at) VALUES (?, ?, 'source_video', ?, 'source.transcribed', ?, ?)"
+    ).bind(crypto.randomUUID(), job.workspace_id, job.source_video_id, JSON.stringify({ transcriptId, jobId: job.id, model: MODEL }), now)
+  ]);
+}
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/health") {
+      return json({
+        ok: true,
+        service: "ShortsFlow Analysis Engine",
+        mode: "scheduled",
+        bindings: {
+          database: Boolean(env.DB),
+          sourceStorage: Boolean(env.SOURCE_MEDIA),
+          mediaTransformations: Boolean(env.MEDIA_TRANSFORM),
+          workersAI: Boolean(env.AI)
+        }
+      });
+    }
+    return json({ ok: false, error: "Not found." }, 404);
+  },
+
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(processNextJob(env));
+  }
+};
