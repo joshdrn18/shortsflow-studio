@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "check": "npm run check:js && npm run check:sql",
-    "check:js": "node --check assets/app.js && node --check functions/api/health.js && node --check functions/api/_lib/auth.js && node --check functions/api/auth/register.js && node --check functions/api/auth/login.js && node --check functions/api/auth/me.js && node --check functions/api/auth/logout.js && node --check functions/api/workspace/summary.js && node --check functions/api/sources/upload.js && node --check functions/api/sources/index.js && node --check assets/sources.js && node --check functions/api/workspace/settings.js && node --check assets/watermark.js",
+    "check:js": "node --check assets/app.js && node --check functions/api/health.js && node --check functions/api/_lib/auth.js && node --check functions/api/auth/register.js && node --check functions/api/auth/login.js && node --check functions/api/auth/me.js && node --check functions/api/auth/logout.js && node --check functions/api/workspace/summary.js && node --check functions/api/sources/upload.js && node --check functions/api/sources/index.js && node --check functions/api/jobs/index.js && node --check assets/sources.js && node --check functions/api/workspace/settings.js && node --check assets/watermark.js",
     "check:sql": "python3 scripts/check_migrations.py"
   }
 }
