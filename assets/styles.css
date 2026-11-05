@@ -106,3 +106,32 @@
 .upload-progress{border:1px solid #39334d;background:#15131f;border-radius:12px;padding:15px 18px}.upload-progress>p{font-size:10px;color:#a9a4bb;margin:9px 0 0}
 @media(max-width:900px){.source-intake{grid-template-columns:1fr 1fr;padding:22px}.sources-list{grid-template-columns:1fr}}
 @media(max-width:640px){.source-intake{grid-template-columns:1fr;padding:19px;gap:20px}.source-dropzone{min-height:190px}.source-section-heading{align-items:flex-start}.source-section-heading h3{font-size:16px}.source-card-visual{height:100px}.source-card-body{padding:11px}.source-card-title>strong{font-size:11px}}
+/* AI clip discovery — editorial results workspace */
+.clips-workspace{gap:22px}
+.discovery-hero{position:relative;display:grid;grid-template-columns:1.2fr .8fr;min-height:230px;overflow:hidden;padding:30px 34px;border:1px solid #342d49;border-radius:17px;background:radial-gradient(ellipse at 82% 48%,#34264f 0,transparent 42%),linear-gradient(115deg,#171621,#151720 65%,#211a30)}
+.discovery-hero-copy{position:relative;z-index:1;align-self:center}.discovery-kicker{display:block;color:#ae9af3;font-size:9px;font-weight:700;letter-spacing:1.7px}
+.discovery-hero h2{font:800 clamp(25px,3.2vw,36px)/1.08 Manrope,sans-serif;letter-spacing:-1.5px;margin:12px 0 10px}.discovery-hero h2 em{font-style:normal;color:#b49cff}
+.discovery-hero-copy>p{max-width:440px;color:#a5a8b7;font-size:11px;line-height:1.8;margin:0}
+.discovery-hero-meta{display:flex;flex-wrap:wrap;gap:9px 16px;margin-top:20px}.discovery-hero-meta span{font-size:9px;color:#a2a3b2}.discovery-hero-meta i{display:inline-block;width:6px;height:6px;border-radius:50%;background:#69d6a3;margin-right:6px;box-shadow:0 0 10px #69d6a377}
+.discovery-hero-art{position:relative;min-height:170px;display:grid;place-items:center}.discovery-orbit{position:absolute;width:210px;height:210px;border:1px solid #a58af333;border-radius:50%;transform:scaleY(.55) rotate(-25deg)}.orbit-b{width:270px;height:150px;transform:rotate(32deg);border-color:#a58af322}
+.discovery-scan-card{position:relative;z-index:1;width:190px;padding:16px;border:1px solid #65528a;border-radius:12px;background:linear-gradient(145deg,#28213b,#171722);box-shadow:0 18px 55px #0006;transform:rotate(-4deg)}
+.discovery-scan-card>span{font-size:8px;letter-spacing:1.5px;color:#b6a3f5}.discovery-scan-card>strong{display:block;font:800 34px Manrope,sans-serif;color:#f0eaff;margin:9px 0 2px}.discovery-scan-card>strong span{font-size:12px;color:#8d849f}.discovery-scan-card>small{font-size:9px;color:#a9a3b8}
+.discovery-scan-bars{display:flex;align-items:center;gap:4px;height:25px;margin-top:12px}.discovery-scan-bars i{flex:1;border-radius:3px;background:linear-gradient(#c4b0ff,#7556bf);height:35%}.discovery-scan-bars i:nth-child(2n){height:75%}.discovery-scan-bars i:nth-child(3n){height:100%}.discovery-scan-bars i:nth-child(4n){height:52%}
+.discovery-results{display:grid;gap:14px}.clips-toolbar{padding:0 1px 14px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent}
+.clips-toolbar>div{display:grid;gap:5px}.clips-toolbar strong{font:700 18px Manrope,sans-serif;letter-spacing:-.4px}.clips-toolbar p{font-size:10px;color:var(--muted);margin:0}.clips-toolbar .text-button{border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:10px}
+.clips-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.clip-candidate{grid-template-columns:32px minmax(0,1fr);gap:12px;padding:16px;border:1px solid #292e3a;border-radius:13px;background:linear-gradient(145deg,#151821,#11141b);transition:border-color .18s,transform .18s,box-shadow .18s}
+.clip-candidate:hover{border-color:#554875;transform:translateY(-2px);box-shadow:0 12px 30px #0003}
+.clip-rank{width:28px;height:28px;border:1px solid #44385f;background:#211d30;color:#cbbaff;font:700 10px Manrope,sans-serif}
+.clip-title-row{align-items:flex-start}.clip-title-row>div:first-child{min-width:0;display:grid;gap:5px}.clip-source-label,.clip-score-label{font-size:8px;letter-spacing:1.1px;color:#8f91a3;font-weight:700}
+.clip-title-row strong{font:700 13px/1.4 Manrope,sans-serif;overflow-wrap:anywhere}.clip-title-row small{font-size:10px;line-height:1.5;color:#b5a9d7}
+.clip-score-wrap{display:grid;justify-items:end;gap:4px;flex:none}.clip-score{font:800 16px Manrope,sans-serif;border:1px solid #493b68;background:#241e34;color:#d0c0ff;padding:5px 8px}.clip-score small{font-size:9px;color:#9d8fc2}
+.clip-transcript-box{margin-top:13px;padding:10px 11px;border:1px solid #272b36;border-radius:8px;background:#0e1118}.clip-transcript-box>span{font-size:7px;letter-spacing:1.2px;color:#858b9b;font-weight:700}.clip-transcript{margin:6px 0 0;font-size:10px;line-height:1.65;color:#c1c5d0}
+.clip-meta{gap:6px;margin-top:10px}.clip-meta span{font-size:8px;padding:5px 7px;background:#171b24}
+.clip-caption{font-size:10px;line-height:1.55;color:#b8bdc9}.clip-hashtags{font-size:9px}
+.clip-actions{margin-top:13px}.clip-preview-btn{width:100%;display:flex;align-items:center;justify-content:space-between;border:1px solid #4a3d68;border-radius:8px;background:#28213a;color:#d7c9ff;padding:9px 11px;font-size:10px;font-weight:700}.clip-preview-btn:hover{background:#352a4c;border-color:#8067b7}.clip-preview-btn span{font-size:14px}
+.discovery-empty{grid-column:1/-1;display:grid;justify-items:center;text-align:center;padding:44px 22px;border:1px dashed #393448;border-radius:14px;background:radial-gradient(ellipse at 50% 0%,#28213b 0,transparent 60%),#11141b}
+.discovery-empty-symbol{width:45px;height:45px;display:grid;place-items:center;border:1px solid #554575;border-radius:13px;background:#28213b;color:#c6b4ff;font-size:22px;margin-bottom:14px}
+.discovery-empty>b{font:700 14px Manrope,sans-serif;margin-top:9px}.discovery-empty>p{max-width:390px;color:#9298a7;font-size:10px;line-height:1.7;margin:8px 0 14px}.discovery-empty .text-button{border:1px solid #51436e;border-radius:8px;padding:9px 12px;color:#d0c2f5;font-size:10px}
+@media(max-width:900px){.clips-list{grid-template-columns:1fr}.discovery-hero{grid-template-columns:1.1fr .9fr;padding:24px}}
+@media(max-width:620px){.discovery-hero{grid-template-columns:1fr;padding:21px;gap:0}.discovery-hero-art{min-height:145px}.discovery-scan-card{width:170px}.clips-toolbar{align-items:flex-start}.clip-candidate{padding:13px;gap:9px}.clip-title-row strong{font-size:12px}}
