@@ -440,7 +440,7 @@ async function processClipDiscovery(env, job) {
   ).bind(job.id).all();
   const existing = (existingResult.results || []).map(row => ({ start: Number(row.start_seconds), end: Number(row.end_seconds) }));
   const accepted = [];
-  const rejected = { invalidTime: 0, boundary: 0, tooLong: 0, outsideDuration: 0, overlap: 0, missingHook: 0, missingExcerpt: 0 };\n  let expandedShortMoments = 0;
+  const rejected = { invalidTime: 0, boundary: 0, tooShort: 0, tooLong: 0, outsideDuration: 0, overlap: 0, missingHook: 0, missingExcerpt: 0 };\n  let expandedShortMoments = 0;
   const nearest = (value, field) => words.reduce((best, word) => {
     const current = Number(word[field]);
     return Math.abs(current - value) < Math.abs(Number(best[field]) - value) ? word : best;
@@ -490,7 +490,7 @@ async function processClipDiscovery(env, job) {
       expandedShortMoments++;
     }
     if (start < 0 || end > duration) { rejected.outsideDuration++; continue; }
-    if (clipDuration < 15) { rejected.tooLong++; continue; }
+    if (clipDuration < 15) { rejected.tooShort++; continue; }
     if (clipDuration > 60) { rejected.tooLong++; continue; }
     const overlaps = [...existing, ...accepted].some(other => {
       const overlap = Math.max(0, Math.min(end, other.end) - Math.max(start, other.start));
