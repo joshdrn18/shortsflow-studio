@@ -34,7 +34,8 @@ required = {
     "workspace_members",
     "user_sessions",
     "auth_login_attempts",
-    "workspace_settings",\n    "processing_jobs",
+    "workspace_settings",
+    "processing_jobs",
 }
 missing = required - tables
 if missing:
