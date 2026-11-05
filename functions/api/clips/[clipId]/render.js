@@ -36,11 +36,12 @@ export async function onRequestPost({request,env,params}){
   if(size<1024)throw new Error("Rendered file is empty or incomplete.");
   const latest=await env.DB.prepare("SELECT COALESCE(MAX(version),0) AS version FROM clip_assets WHERE clip_id=? AND asset_type='render'").bind(id).first();
   const version=Number(latest?.version||0)+1,now=new Date().toISOString();
-  await env.DB.batch([
-   env.DB.prepare("INSERT INTO clip_assets (id,clip_id,asset_type,storage_key,mime_type,size_bytes,version,metadata_version,created_at) VALUES (?,?,'render',?,'video/webm',?,?,?,?)").bind(assetId,id,key,size,version,mv,now),
-   env.DB.prepare("UPDATE clips SET status='rendered',updated_at=? WHERE id=? AND workspace_id=?").bind(now,id,user.workspace.id),
-   env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) VALUES (?,?,'clip',?,'clip_rendered',?,?)").bind(crypto.randomUUID(),user.workspace.id,id,JSON.stringify({assetVersion:version,metadataVersion:mv,sizeBytes:size,format:"webm"}),now)
+  const saved = await env.DB.batch([
+   env.DB.prepare("INSERT INTO clip_assets (id,clip_id,asset_type,storage_key,mime_type,size_bytes,version,metadata_version,created_at) SELECT ?,?,'render',?,'video/webm',?,?,?,? WHERE (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?").bind(assetId,id,key,size,version,mv,now,id,mv),
+   env.DB.prepare("UPDATE clips SET status='rendered',updated_at=? WHERE id=? AND workspace_id=? AND (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?").bind(now,id,user.workspace.id,id,mv),
+   env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) SELECT ?,?, 'clip',?,'clip_rendered',?,? WHERE EXISTS (SELECT 1 FROM clip_assets WHERE id=?)").bind(crypto.randomUUID(),user.workspace.id,id,JSON.stringify({assetVersion:version,metadataVersion:mv,sizeBytes:size,format:"webm"}),now,assetId)
   ]);
+  if (Number(saved[0]?.meta?.changes || 0) !== 1) throw new Error("Clip settings changed while rendering. Please render the latest version again.");
   return json({ok:true,asset:{id:assetId,version,metadataVersion:mv,sizeBytes:size,mimeType:"video/webm",url:`/api/clips/${id}/render`}},201);
  }catch(e){if(key){try{await env.MEDIA.delete(key);}catch{}}console.error("render_upload_failed",e);const msg=String(e?.message||"");return json({ok:false,error:msg.includes("90 MB")?msg:"Could not save the rendered video. Please retry."},msg.includes("90 MB")?413:500);}
 }
