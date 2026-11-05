@@ -39,7 +39,7 @@
     if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start||end>duration||end-start<1||end-start>180){
       $("#clip-preview-message").textContent="Cut must be 1–180 seconds and stay within the source video.";syncTrimInputs();return;
     }
-    clipStart=start;clipEnd=end;window.__shortsflowClipStart=clipStart;window.__shortsflowClipEnd=clipEnd;const video=$("#clip-preview-video");video.pause();video.currentTime=clipStart;syncTrimInputs();
+    clipStart=start;clipEnd=end;window.__shortsflowClipStart=clipStart;window.__shortsflowClipEnd=clipEnd;const video=$("#clip-preview-video");video.pause();video.currentTime=clipStart;syncTrimInputs();$("#clip-preview-seek").max=(clipEnd-clipStart).toFixed(1);$("#clip-preview-seek").value="0";$("#clip-preview-current").textContent=time(clipStart);$("#clip-preview-duration").textContent=time(clipEnd);
     $("#clip-preview-message").textContent="Cut adjusted · "+(clipEnd-clipStart).toFixed(1)+" sec · unsaved";
   }
   function playCut(){
