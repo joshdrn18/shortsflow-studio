@@ -74,6 +74,10 @@ async function checkHealth() {
     version.textContent = "API status: unavailable";
   }
 }
-$("#refresh-btn").addEventListener("click", () => { checkHealth();
-loadWorkspaceSummary(); loadWorkspaceSummary(); toast("System status refreshed."); });
+$("#refresh-btn").addEventListener("click", () => {
+  checkHealth();
+  loadWorkspaceSummary();
+  toast("System status refreshed.");
+});
 checkHealth();
+loadWorkspaceSummary();
