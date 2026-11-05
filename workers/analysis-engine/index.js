@@ -254,6 +254,8 @@ async function processNextJob(env) {
 
 async function completeTranscript(env, job, payload, transcriptId) {
   const now = new Date().toISOString();
+  const discoveryJobId = crypto.randomUUID();
+  const discoveryKey = "discover_clips:" + job.workspace_id + ":" + job.source_video_id + ":" + transcriptId + ":v1";
   await env.DB.batch([
     env.DB.prepare(
       "UPDATE source_transcripts SET status = 'completed', audio_duration_seconds = COALESCE(?, audio_duration_seconds), error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
@@ -264,6 +266,12 @@ async function completeTranscript(env, job, payload, transcriptId) {
     env.DB.prepare(
       "UPDATE processing_jobs SET status = 'succeeded', payload_json = ?, result_json = ?, completed_at = ?, updated_at = ?, locked_until = NULL, locked_by = NULL, last_error = NULL WHERE id = ?"
     ).bind(JSON.stringify({ ...payload, transcriptId }), JSON.stringify({ transcriptId, stage: "transcription_complete" }), now, now, job.id),
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO processing_jobs
+       (id, workspace_id, source_video_id, job_type, status, idempotency_key, payload_json, created_at, updated_at)
+       VALUES (?, ?, ?, 'discover_clips', 'queued', ?, ?, ?, ?)`
+    ).bind(discoveryJobId, job.workspace_id, job.source_video_id, discoveryKey,
+      JSON.stringify({ transcriptId, pipelineVersion: 1 }), now, now),
     env.DB.prepare(
       "INSERT INTO activity_logs (id, workspace_id, entity_type, entity_id, event, details, created_at) VALUES (?, ?, 'source_video', ?, 'source.transcribed', ?, ?)"
     ).bind(crypto.randomUUID(), job.workspace_id, job.source_video_id, JSON.stringify({ transcriptId, jobId: job.id, model: MODEL }), now)
