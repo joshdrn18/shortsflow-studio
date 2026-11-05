@@ -41,7 +41,16 @@ export async function onRequestPost({request,env}){
 export async function onRequestDelete({request,env}){
  const user=await getSessionUser(request,env);if(!user?.workspace?.id)return json({ok:false,error:"Authentication required."},401);
  const url=new URL(request.url),id=url.searchParams.get("id");if(!ID.test(id||""))return json({ok:false,error:"Invalid publishing job ID."},400);
- const result=await env.DB.prepare("UPDATE publishing_jobs SET status='cancelled',updated_at=? WHERE id=? AND status='queued' AND clip_id IN (SELECT id FROM clips WHERE workspace_id=?)").bind(new Date().toISOString(),id,user.workspace.id).run();
- if(!result.meta?.changes)return json({ok:false,error:"Only queued jobs can be cancelled."},409);
- return json({ok:true,cancelled:true});
+ const job=await env.DB.prepare("SELECT p.id,p.status FROM publishing_jobs p JOIN clips c ON c.id=p.clip_id WHERE p.id=? AND p.platform='youtube' AND c.workspace_id=?").bind(id,user.workspace.id).first();
+ if(!job)return json({ok:false,error:"Publishing job not found."},404);
+ if(job.status==="queued"){
+  await env.DB.prepare("UPDATE publishing_jobs SET status='cancelled',updated_at=? WHERE id=? AND status='queued'").bind(new Date().toISOString(),id).run();
+  return json({ok:true,cancelled:true});
+ }
+ if(job.status==="failed"){
+  const result=await env.DB.prepare("DELETE FROM publishing_jobs WHERE id=? AND status='failed' AND platform='youtube'").bind(id).run();
+  if(!result.meta?.changes)return json({ok:false,error:"This job changed state. Refresh the queue and try again."},409);
+  return json({ok:true,deleted:true});
+ }
+ return json({ok:false,error:"Only queued jobs can be cancelled or failed jobs can be deleted."},409);
 }
