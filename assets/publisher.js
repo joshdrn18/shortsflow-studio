@@ -43,8 +43,9 @@
   $("#publisher-submit").disabled=!c?.connected||!state.eligible.length;
   const list=$("#publisher-jobs");
   if(!state.jobs.length){list.innerHTML='<div class="publisher-empty">No publishing jobs yet. Approved clips will appear in the planner above.</div>';return;}
-  list.innerHTML=state.jobs.map(j=>'<article class="publisher-job"><div class="publisher-job-main"><b>'+esc(j.title||j.clip_title||"YouTube Short")+'</b><span>'+esc(date(j.scheduled_at))+'</span></div><span class="publisher-status status-'+esc(j.status)+'">'+esc(j.status)+'</span>'+(j.platform_url?'<a href="'+esc(j.platform_url)+'" target="_blank" rel="noopener">Watch ↗</a>':"")+(j.status==="queued"?'<button class="text-button" data-cancel="'+esc(j.id)+'">Cancel</button>':"")+'</article>').join("");
+  list.innerHTML=state.jobs.map(j=>'<article class="publisher-job"><div class="publisher-job-main"><b>'+esc(j.title||j.clip_title||"YouTube Short")+'</b><span>'+esc(date(j.scheduled_at))+'</span>'+(j.status==="failed"&&j.last_error?'<small class="publisher-error-detail">'+esc(j.last_error)+'</small>':"")+'</div><span class="publisher-status status-'+esc(j.status)+'">'+esc(j.status)+'</span>'+(j.platform_url?'<a href="'+esc(j.platform_url)+'" target="_blank" rel="noopener">Watch ↗</a>':"")+(j.status==="queued"?'<button class="text-button" data-cancel="'+esc(j.id)+'">Cancel</button>':"")+(j.status==="failed"?'<button class="text-button" data-delete="'+esc(j.id)+'" aria-label="Delete failed publishing job">Delete</button>':"")+'</article>').join("");
   list.querySelectorAll("[data-cancel]").forEach(btn=>btn.addEventListener("click",()=>cancel(btn.dataset.cancel)));
+  list.querySelectorAll("[data-delete]").forEach(btn=>btn.addEventListener("click",()=>removeFailed(btn.dataset.delete)));
  }
  async function load(){
   ensure();if(state.loading)return;state.loading=true;
@@ -71,6 +72,11 @@
  async function cancel(id){
   if(!window.confirm("Cancel this queued YouTube upload?"))return;
   try{const response=await fetch("/api/youtube?id="+encodeURIComponent(id),{method:"DELETE"}),data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not cancel job.");await load();}
+  catch(e){setMessage(e.message,true);}
+ }
+ async function removeFailed(id){
+  if(!window.confirm("Delete this failed queue record? The rendered video file will remain in your library."))return;
+  try{const response=await fetch("/api/youtube?id="+encodeURIComponent(id),{method:"DELETE"}),data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not delete failed job.");setMessage("Failed queue record deleted.");await load();}
   catch(e){setMessage(e.message,true);}
  }
  document.addEventListener("shortsflow:view",e=>{if(e.detail?.view==="publisher"){ensure();$("#publisher-workspace").classList.remove("hidden");load();}else $("#publisher-workspace")?.classList.add("hidden");});
