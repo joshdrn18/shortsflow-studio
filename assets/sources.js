@@ -7,7 +7,7 @@
     if ($("#sources-workspace")) return;
     const panel=document.createElement("section");
     panel.id="sources-workspace"; panel.className="sources-workspace hidden";
-    panel.innerHTML='<div class="source-upload-panel"><div class="upload-symbol">↑</div><div class="upload-copy"><h2>Add a source video</h2><p>Upload an MP4, MOV, WebM or MKV file. Your original is stored privately in your ShortsFlow R2 bucket.</p><small>Current upload limit: 90 MB per file</small></div><button class="primary-button" id="choose-source-btn">Choose video</button></div><div class="upload-progress hidden" id="upload-progress"><div class="progress-heading"><strong id="upload-filename">Uploading video</strong><span id="upload-percent">0%</span></div><div class="progress-track"><i id="upload-progress-bar"></i></div><p id="upload-status">Preparing secure upload…</p></div><div class="jobs-list-panel"><div class="panel-heading"><div><h3>Processing queue</h3><p>Persistent jobs waiting for the rendering pipeline.</p></div><button class="text-button" id="refresh-jobs-btn">Refresh</button></div><div id="jobs-list" class="jobs-list"></div></div><div class="sources-list-panel"><div class="panel-heading"><div><h3>Your source videos</h3><p>Private originals saved to your workspace.</p></div><button class="text-button" id="refresh-sources-btn">Refresh</button></div><div id="sources-list" class="sources-list"></div></div>';
+    panel.innerHTML='<div class="source-upload-panel"><div class="upload-symbol">↑</div><div class="upload-copy"><h2>Add a source video</h2><p>Upload an MP4, MOV, WebM or MKV file. Your original is stored privately in your ShortsFlow R2 bucket.</p><small>Current upload limit: 90 MB per file</small></div><button class="primary-button" id="choose-source-btn">Choose video</button></div><div class="upload-progress hidden" id="upload-progress"><div class="progress-heading"><strong id="upload-filename">Uploading video</strong><span id="upload-percent">0%</span></div><div class="progress-track"><i id="upload-progress-bar"></i></div><p id="upload-status">Preparing secure upload…</p></div><div class="jobs-list-panel"><div class="panel-heading"><div><h3>Processing queue</h3><p>Persistent jobs waiting for the rendering pipeline.</p></div><button class="text-button" id="refresh-jobs-btn">Refresh</button></div><div id="jobs-list" class="jobs-list"></div></div><div class="sources-list-panel"><div class="panel-heading"><div><h3>Your source videos</h3><p>Private originals saved to your workspace.</p></div><button class="text-button" id="refresh-sources-btn">Refresh</button></div><div id="sources-list" class="sources-list"></div></div><dialog id="source-preview-dialog" class="source-preview-dialog"><div class="source-preview-head"><div><strong id="source-preview-title">Video preview</strong><small>Private workspace preview</small></div><button type="button" id="source-preview-close" class="text-button">Close ✕</button></div><video id="source-preview-video" controls playsinline preload="metadata"></video><p id="source-preview-message" role="status">Loading preview…</p></dialog>';
     $(".page-heading").after(panel);
     $("#choose-source-btn").addEventListener("click",()=>$("#source-file").click());
     $("#refresh-sources-btn").addEventListener("click",load); $("#refresh-jobs-btn").addEventListener("click",loadJobs);
@@ -19,9 +19,28 @@
       const r=await fetch("/api/sources",{headers:{accept:"application/json"}});
       const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||"Could not load sources.");
       if(!d.sources.length){list.innerHTML='<div class="sources-empty"><b>No source videos yet</b><p>Upload your first video to start building your Shorts library.</p></div>';return;}
-      list.innerHTML=d.sources.map(s=>'<article class="source-row"><div class="source-file-icon">▶</div><div class="source-file-info"><strong>'+esc(s.title)+'</strong><small>'+bytes(s.sizeBytes)+' · '+esc(s.mimeType||"video")+' · '+esc(new Date(s.createdAt).toLocaleString())+'</small></div><span class="source-status">'+esc(s.status)+'</span><button class="text-button queue-source-btn" data-source-id="'+esc(s.id)+'">Queue analysis</button></article>').join("");
-      list.querySelectorAll(".queue-source-btn").forEach(btn=>btn.addEventListener("click",()=>queueSource(btn.dataset.sourceId,btn))); await loadJobs();
+      list.innerHTML=d.sources.map(s=>'<article class="source-row"><div class="source-file-icon">▶</div><div class="source-file-info"><strong>'+esc(s.title)+'</strong><small>'+bytes(s.sizeBytes)+' · '+esc(s.mimeType||"video")+' · '+esc(new Date(s.createdAt).toLocaleString())+'</small></div><span class="source-status">'+esc(s.status)+'</span><div class="source-row-actions"><button type="button" class="text-button preview-source-btn" data-source-id="'+esc(s.id)+'" data-source-title="'+esc(s.title)+'">Preview</button><button type="button" class="text-button queue-source-btn" data-source-id="'+esc(s.id)+'">Queue analysis</button></div></article>').join("");
+      list.querySelectorAll(".queue-source-btn").forEach(btn=>btn.addEventListener("click",()=>queueSource(btn.dataset.sourceId,btn)));
+      list.querySelectorAll(".preview-source-btn").forEach(btn=>btn.addEventListener("click",()=>openPreview(btn.dataset.sourceId,btn.dataset.sourceTitle)));
+      await loadJobs();
     } catch(e){list.innerHTML='<div class="sources-empty error"><b>Could not load sources</b><p>'+esc(e.message)+'</p></div>';}
+  }
+  function openPreview(sourceId, title) {
+    const dialog=$("#source-preview-dialog");
+    const video=$("#source-preview-video");
+    const message=$("#source-preview-message");
+    if(!dialog || !video) return;
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    $("#source-preview-title").textContent=title || "Video preview";
+    message.textContent="Loading private video preview…";
+    message.classList.remove("error-text");
+    video.src="/api/sources/"+encodeURIComponent(sourceId);
+    video.onerror=()=>{message.textContent="This video format or codec may not be supported by your browser.";message.classList.add("error-text");};
+    video.onloadedmetadata=()=>{message.textContent=video.duration ? "Duration: "+Math.floor(video.duration/60)+":"+String(Math.floor(video.duration%60)).padStart(2,"0") : "Preview ready.";};
+    if(typeof dialog.showModal==="function") dialog.showModal();
+    else dialog.setAttribute("open","");
   }
   async function loadJobs() {
     const list=$("#jobs-list"); if(!list) return;
@@ -53,6 +72,8 @@
   document.addEventListener("DOMContentLoaded",()=>{
     ensurePanel();
     const input=$("#source-file"); loadJobs();
+    $("#source-preview-close").addEventListener("click",()=>{const dialog=$("#source-preview-dialog");$("#source-preview-video").pause();$("#source-preview-video").removeAttribute("src");$("#source-preview-video").load();if(dialog.close)dialog.close();else dialog.removeAttribute("open");});
+    $("#source-preview-dialog").addEventListener("click",event=>{if(event.target.id==="source-preview-dialog")$("#source-preview-close").click();});
     input.addEventListener("change",e=>{const f=e.target.files&&e.target.files[0];if(f)upload(f);e.target.value="";});
     document.addEventListener("shortsflow:view", event => {
       if (event.detail?.view !== "sources") return;
