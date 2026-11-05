@@ -30,12 +30,12 @@
    const r=await fetch("/api/workspace/settings",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"Could not save settings.");msg.textContent="Watermark settings saved to your workspace.";
   }catch(e){msg.textContent=e.message;}finally{b.disabled=false;b.textContent="Save watermark settings";}
  }
- document.addEventListener("DOMContentLoaded",()=>{
+ document.addEventListener("DOMContentLoaded", () => {
   panel();
-  document.querySelectorAll('[data-view="settings"]').forEach(btn=>btn.addEventListener("click",()=>{
-   const show=$("#watermark-settings");show.classList.remove("hidden");
-   $(".welcome-panel")?.classList.add("hidden");$(".section-head")?.classList.add("hidden");$(".stats-grid")?.classList.add("hidden");$(".lower-grid")?.classList.add("hidden");
+  document.addEventListener("shortsflow:view", event => {
+   if (event.detail?.view !== "settings") return;
+   $("#watermark-settings").classList.remove("hidden");
    load();
-  }));
+  });
  });
 })();
