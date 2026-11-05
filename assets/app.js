@@ -35,7 +35,7 @@ function ensurePlaceholder() {
 function hideAllPagePanels() {
   [
     ".welcome-panel", ".section-head", ".stats-grid", ".lower-grid",
-    "#sources-workspace", "#clips-workspace", "#watermark-settings", "#feature-placeholder"
+    "#sources-workspace", "#clips-workspace", "#library-workspace", "#watermark-settings", "#feature-placeholder"
   ].forEach((selector) => $(selector)?.classList.add("hidden"));
 }
 
@@ -54,7 +54,7 @@ function navigate(view) {
 
   if (next === "overview") {
     [".welcome-panel", ".section-head", ".stats-grid", ".lower-grid"].forEach((selector) => $(selector)?.classList.remove("hidden"));
-  } else if (next === "sources" || next === "clips" || next === "settings") {
+  } else if (next === "sources" || next === "clips" || next === "library" || next === "settings") {
     document.dispatchEvent(new CustomEvent("shortsflow:view", { detail: { view: next } }));
   } else {
     const panel = ensurePlaceholder();
