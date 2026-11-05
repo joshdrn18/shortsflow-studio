@@ -20,7 +20,8 @@
       const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||"Could not load sources.");
       if(!d.sources.length){list.innerHTML='<div class="sources-empty"><b>No source videos yet</b><p>Upload your first video to start building your Shorts library.</p></div>';return;}
       list.innerHTML=d.sources.map(s=>'<article class="source-row"><div class="source-file-icon">▶</div><div class="source-file-info"><strong>'+esc(s.title)+'</strong><small>'+bytes(s.sizeBytes)+' · '+esc(s.mimeType||"video")+' · '+esc(new Date(s.createdAt).toLocaleString())+'</small></div><span class="source-status">'+esc(s.status)+'</span><button class="text-button queue-source-btn" data-source-id="'+esc(s.id)+'">Queue analysis</button></article>').join("");
-      list.querySelectorAll(".queue-source-btn").forEach(btn=>btn.addEventListener("click",()=>queueSource(btn.dataset.sourceId,btn))); await loadJobs();\n    } catch(e){list.innerHTML='<div class="sources-empty error"><b>Could not load sources</b><p>'+esc(e.message)+'</p></div>';}
+      list.querySelectorAll(".queue-source-btn").forEach(btn=>btn.addEventListener("click",()=>queueSource(btn.dataset.sourceId,btn))); await loadJobs();
+    } catch(e){list.innerHTML='<div class="sources-empty error"><b>Could not load sources</b><p>'+esc(e.message)+'</p></div>';}
   }
   async function loadJobs() {
     const list=$("#jobs-list"); if(!list) return;
