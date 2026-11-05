@@ -56,19 +56,20 @@ async function releaseJob(env, jobId, payload, message = null) {
 async function failJob(env, job, transcriptId, message) {
   const now = new Date().toISOString();
   const safeMessage = String(message || "Analysis failed.").slice(0, 1000);
-  await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE processing_jobs SET status = 'failed', attempts = attempts + 1,
-         last_error = ?, locked_until = NULL, locked_by = NULL, updated_at = ?,
-         completed_at = ? WHERE id = ?`
-    ).bind(safeMessage, now, now, job.id),
-    env.DB.prepare(
+  const statements = [env.DB.prepare(
+    `UPDATE processing_jobs SET status = 'failed', attempts = attempts + 1,
+       last_error = ?, locked_until = NULL, locked_by = NULL, updated_at = ?,
+       completed_at = ? WHERE id = ?`
+  ).bind(safeMessage, now, now, job.id)];
+  if (job.job_type === "analyze_source") {
+    statements.push(env.DB.prepare(
       "UPDATE source_videos SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ? AND workspace_id = ?"
-    ).bind(safeMessage, now, job.source_video_id, job.workspace_id),
-    ...(transcriptId ? [env.DB.prepare(
+    ).bind(safeMessage, now, job.source_video_id, job.workspace_id));
+    if (transcriptId) statements.push(env.DB.prepare(
       "UPDATE source_transcripts SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ? AND workspace_id = ?"
-    ).bind(safeMessage, now, transcriptId, job.workspace_id)] : [])
-  ]);
+    ).bind(safeMessage, now, transcriptId, job.workspace_id));
+  }
+  await env.DB.batch(statements);
 }
 
 async function reserveAiBudget(env, seconds) {
