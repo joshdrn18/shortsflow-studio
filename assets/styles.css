@@ -52,3 +52,15 @@
 .clip-caption{margin:12px 0 4px;color:#c2c7d2;font-size:11px;line-height:1.6}
 .clip-hashtags{color:#9e8bdf;font-size:10px}
 @media(max-width:640px){.clip-candidate{grid-template-columns:32px minmax(0,1fr);gap:10px;padding:14px}.clip-rank{width:30px;height:30px}.clips-toolbar{padding:14px}.clip-title-row{gap:8px}}
+
+.clip-actions{display:flex;gap:8px;margin-top:12px}
+.clip-preview-btn{border:1px solid #39334d;border-radius:7px;padding:8px 11px;font-size:10px}
+.clip-preview-dialog{width:min(92vw,760px);max-height:92vh;overflow:auto;border:1px solid #3a354d;border-radius:16px;background:#111319;color:#f2f3f7;padding:18px;box-shadow:0 25px 90px #000b}
+.clip-preview-dialog::backdrop{background:rgba(5,6,10,.84);backdrop-filter:blur(7px)}
+.clip-preview-dialog video{display:block;width:100%;max-height:62vh;background:#050608;border-radius:10px}
+.clip-trim-controls{display:grid;grid-template-columns:1fr 1fr auto;align-items:end;gap:10px;margin-top:14px}
+.clip-trim-controls label{display:grid;gap:6px;font-size:10px;color:#aeb3c0}
+.clip-trim-controls input{height:38px;min-width:0;background:#0d0f14;border:1px solid #303541;border-radius:7px;color:#eee;padding:0 10px;font:11px "DM Sans",sans-serif}
+.clip-preview-dialog>p{font-size:10px;color:var(--muted);margin:12px 2px 5px;min-height:14px}
+.clip-preview-note{display:block;color:#858b9b;font-size:9px;line-height:1.5}
+@media(max-width:600px){.clip-preview-dialog{padding:12px}.clip-trim-controls{grid-template-columns:1fr 1fr}.clip-trim-controls button{grid-column:1/-1}}
