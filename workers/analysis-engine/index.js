@@ -252,6 +252,130 @@ async function processNextJob(env) {
   }
 }
 
+async function processClipDiscovery(env, job) {
+  const payload = parsePayload(job.payload_json);
+  const transcriptId = payload.transcriptId;
+  if (!transcriptId) throw new Error("Transcript reference is missing from this discovery job.");
+
+  const transcript = await env.DB.prepare(
+    "SELECT id, language, transcript_text, segments_json, audio_duration_seconds FROM source_transcripts WHERE id = ? AND workspace_id = ? AND source_video_id = ? AND status = 'completed'"
+  ).bind(transcriptId, job.workspace_id, job.source_video_id).first();
+  if (!transcript) throw new Error("A completed transcript is required before clip discovery.");
+
+  let words = [];
+  try { words = JSON.parse(transcript.segments_json || "[]"); } catch { words = []; }
+  if (!Array.isArray(words) || words.length < 20) {
+    throw new Error("Not enough timestamped speech was found to identify reliable clip boundaries.");
+  }
+
+  const duration = Number(transcript.audio_duration_seconds || 0);
+  const timeline = words.map(w => "[" + Number(w.start).toFixed(2) + "-" + Number(w.end).toFixed(2) + "] " + String(w.word || "")).join(" ");
+  const system = "You are an expert short-form video editor. Identify the strongest self-contained moments from a transcript. Never invent speech or timestamps. Return valid JSON only.";
+  const prompt = "Select 5 to 15 distinct short-form clip candidates from this transcript. Each clip must be 15 to 60 seconds, have a strong opening hook, make sense without extra context, and end on a complete thought or payoff. Prefer useful, surprising, emotional, funny, story-driven, or high-retention moments. Avoid long pauses, greetings, repeated content, and clips that need missing context. Choose startSeconds and endSeconds from the supplied word timestamps, not guesses. Do not make candidates overlap substantially. Rank the strongest first. Return this exact JSON shape: {\"candidates\":[{\"startSeconds\":12.3,\"endSeconds\":42.8,\"title\":\"Short title\",\"hook\":\"Opening hook\",\"reason\":\"Why this moment works\",\"caption\":\"Short social caption\",\"hashtags\":[\"#shorts\",\"#topic\"],\"score\":91}]}. Source duration: " + duration.toFixed(2) + " seconds. Transcript language: " + (transcript.language || "auto-detected") + ". Timestamped transcript: " + timeline;
+
+  const estimatedInputTokens = Math.ceil((system.length + prompt.length) / 4);
+  const withinBudget = await reserveTextBudget(env, estimatedInputTokens, 2400);
+  if (!withinBudget) {
+    const nextUtcDay = new Date();
+    nextUtcDay.setUTCHours(24, 0, 5, 0);
+    await env.DB.prepare(
+      "UPDATE processing_jobs SET status = 'queued', available_at = ?, locked_until = NULL, locked_by = NULL, last_error = ?, updated_at = ? WHERE id = ?"
+    ).bind(nextUtcDay.toISOString(), "Daily AI safety budget reached; clip discovery will resume after the UTC reset.", new Date().toISOString(), job.id).run();
+    return;
+  }
+
+  const result = await env.AI.run(CLIP_MODEL, {
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 2400,
+    temperature: 0.15,
+    response_format: { type: "json_object" }
+  });
+
+  let raw = String(result?.response || result?.result || result?.text || "").trim();
+  raw = raw.replace(/^\`\`\`(?:json)?\s*/i, "").replace(/\s*\`\`\`$/i, "");
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { throw new Error("AI clip selector returned invalid JSON. Retry discovery."); }
+  const candidates = Array.isArray(parsed) ? parsed : parsed?.candidates;
+  if (!Array.isArray(candidates)) throw new Error("AI clip selector did not return a candidate list.");
+
+  const existingResult = await env.DB.prepare(
+    "SELECT start_seconds, end_seconds FROM clips WHERE discovery_job_id = ?"
+  ).bind(job.id).all();
+  const existing = (existingResult.results || []).map(row => ({ start: Number(row.start_seconds), end: Number(row.end_seconds) }));
+  const accepted = [];
+  const nearest = (value, field) => words.reduce((best, word) => {
+    const current = Number(word[field]);
+    return Math.abs(current - value) < Math.abs(Number(best[field]) - value) ? word : best;
+  }, words[0]);
+
+  const ranked = candidates.map(candidate => ({
+    candidate,
+    score: Math.max(0, Math.min(100, Number(candidate.score ?? candidate.aiScore ?? 0)))
+  })).filter(item => Number.isFinite(item.score)).sort((a,b) => b.score - a.score);
+
+  for (const item of ranked) {
+    if (accepted.length + existing.length >= 15) break;
+    const candidate = item.candidate;
+    const rawStart = Number(candidate.startSeconds ?? candidate.start_seconds);
+    const rawEnd = Number(candidate.endSeconds ?? candidate.end_seconds);
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) continue;
+    const startWord = nearest(rawStart, "start");
+    const endWord = nearest(rawEnd, "end");
+    const start = Number(startWord.start);
+    const end = Number(endWord.end);
+    const clipDuration = end - start;
+    if (Math.abs(start - rawStart) > 3 || Math.abs(end - rawEnd) > 3) continue;
+    if (start < 0 || end > duration || clipDuration < 15 || clipDuration > 60) continue;
+    const overlaps = [...existing, ...accepted].some(other => {
+      const overlap = Math.max(0, Math.min(end, other.end) - Math.max(start, other.start));
+      return overlap / Math.min(clipDuration, other.end - other.start) > 0.3;
+    });
+    if (overlaps) continue;
+
+    const title = String(candidate.title || candidate.hook || "Untitled clip").trim().slice(0, 120);
+    const hook = String(candidate.hook || candidate.title || "").trim().slice(0, 220);
+    if (!hook) continue;
+    const excerpt = words.filter(word => Number(word.start) >= start && Number(word.end) <= end).map(word => String(word.word || "")).join(" ").trim();
+    if (!excerpt) continue;
+    const hashtags = Array.isArray(candidate.hashtags) ? candidate.hashtags.map(tag => String(tag).trim()).filter(Boolean).slice(0, 12).join(" ") : String(candidate.hashtags || "").slice(0, 500);
+    const caption = String(candidate.caption || candidate.reason || "").trim().slice(0, 2000);
+    const clipId = crypto.randomUUID();
+    const metadataId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    accepted.push({ start, end, score: item.score });
+    accepted.push;
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO clips
+         (id, workspace_id, source_video_id, title, start_seconds, end_seconds, hook, ai_score, transcript, status, discovery_job_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'discovered', ?, ?, ?)`
+      ).bind(clipId, job.workspace_id, job.source_video_id, title, start, end, hook, item.score, excerpt, job.id, now, now),
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO clip_metadata (id, clip_id, version, title, caption, hashtags, language, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?)"
+      ).bind(metadataId, clipId, title, caption, hashtags, transcript.language || null, now)
+    ]);
+  }
+
+  const finalCount = await env.DB.prepare(
+    "SELECT COUNT(*) AS total FROM clips WHERE discovery_job_id = ?"
+  ).bind(job.id).first();
+  const count = Number(finalCount?.total || 0);
+  if (!count) throw new Error("No valid clip candidates passed timestamp and duration checks. Retry discovery or use a longer source.");
+
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE processing_jobs SET status = 'succeeded', result_json = ?, completed_at = ?, updated_at = ?, locked_until = NULL, locked_by = NULL, last_error = NULL WHERE id = ?"
+    ).bind(JSON.stringify({ transcriptId, candidates: count, model: CLIP_MODEL }), now, now, job.id),
+    env.DB.prepare(
+      "INSERT INTO activity_logs (id, workspace_id, entity_type, entity_id, event, details, created_at) VALUES (?, ?, 'source_video', ?, 'source.clips_discovered', ?, ?)"
+    ).bind(crypto.randomUUID(), job.workspace_id, job.source_video_id, JSON.stringify({ jobId: job.id, candidates: count, model: CLIP_MODEL }), now)
+  ]);
+}
+
 async function completeTranscript(env, job, payload, transcriptId) {
   const now = new Date().toISOString();
   const discoveryJobId = crypto.randomUUID();
