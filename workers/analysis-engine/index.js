@@ -1,7 +1,7 @@
 const MODEL = "@cf/openai/whisper";
 const CLIP_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
 const CHUNK_SECONDS = 60;
-const MAX_SOURCE_SECONDS = 600;
+const MAX_SOURCE_SECONDS = 1800;
 const DAILY_NEURON_BUDGET = 8000;
 const NEURONS_PER_AUDIO_MINUTE = 41.14;
 const LOCK_SECONDS = 600;
@@ -245,7 +245,7 @@ async function processNextJob(env) {
       throw new Error("Video duration could not be read. Re-upload the source so ShortsFlow can capture its duration.");
     }
     if (duration > MAX_SOURCE_SECONDS) {
-      throw new Error("AI analysis currently supports videos up to 10 minutes.");
+      throw new Error("AI analysis currently supports videos up to 30 minutes.");
     }
     if (Number(source.size_bytes || 0) >= 100 * 1024 * 1024) {
       throw new Error("Source exceeds the Media Transformations 100 MB input limit.");
