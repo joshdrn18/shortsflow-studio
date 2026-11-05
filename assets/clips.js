@@ -1,130 +1,102 @@
 (() => {
   const $ = selector => document.querySelector(selector);
-  const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-  }[char]));
-  const time = value => {
-    const seconds=Math.max(0,Math.floor(Number(value)||0));
-    return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0");
-  };
-  let activeClip=null;
-  let clipStart=0;
-  let clipEnd=0;
-  let stopAtEnd=true;
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+  const time = value => { const seconds=Math.max(0,Math.floor(Number(value)||0)); return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0"); };
+  let activeClip=null, clipStart=0, clipEnd=0, busy=false;
 
   function ensurePanel() {
     if ($("#clips-workspace")) return;
     const panel=document.createElement("section");
-    panel.id="clips-workspace";
-    panel.className="clips-workspace hidden";
-    panel.innerHTML='<div class="clips-toolbar"><div><strong id="clips-total">0 candidates</strong><p>AI-ranked moments from your source videos. Preview and fine-tune a cut before rendering.</p></div><button type="button" class="text-button" id="refresh-clips-btn">Refresh</button></div><div id="clips-list" class="clips-list"></div><dialog id="clip-preview-dialog" class="clip-preview-dialog"><div class="source-preview-head"><div><strong id="clip-preview-title">Clip preview</strong><small id="clip-preview-source">Private source preview</small></div><button type="button" class="text-button" id="clip-preview-close">Close ✕</button></div><video id="clip-preview-video" controls playsinline preload="metadata"></video><div class="clip-trim-controls"><label>Start (seconds)<input id="clip-start" type="number" min="0" step="0.1"></label><label>End (seconds)<input id="clip-end" type="number" min="0.1" step="0.1"></label><button type="button" class="primary-button" id="clip-play-btn">▶ Play cut</button></div><p id="clip-preview-message" role="status">Loading private source video…</p><small class="clip-preview-note">Preview adjustments are temporary. Rendering and saving edited cuts are not available yet.</small></dialog>';
+    panel.id="clips-workspace";panel.className="clips-workspace hidden";
+    panel.innerHTML='<div class="clips-toolbar"><div><strong id="clips-total">0 candidates</strong><p>AI-ranked moments. Preview, edit the cut and metadata, then save a versioned draft.</p></div><button type="button" class="text-button" id="refresh-clips-btn">Refresh</button></div><div id="clips-list" class="clips-list"></div><dialog id="clip-preview-dialog" class="clip-preview-dialog"><div class="source-preview-head"><div><strong id="clip-preview-title">Clip editor</strong><small id="clip-preview-source">Private source preview</small></div><button type="button" class="text-button" id="clip-preview-close">Close ✕</button></div><video id="clip-preview-video" controls playsinline preload="metadata"></video><div class="clip-trim-controls"><label>Start (seconds)<input id="clip-start" type="number" min="0" step="0.1"></label><label>End (seconds)<input id="clip-end" type="number" min="0.1" step="0.1"></label><button type="button" class="primary-button" id="clip-play-btn">▶ Play cut</button></div><div class="clip-metadata-editor"><label>Clip title<input id="clip-edit-title" maxlength="120" placeholder="A clear, engaging title"></label><label>Caption<textarea id="clip-edit-caption" maxlength="2200" rows="3" placeholder="Short description for the post"></textarea></label><label>Hashtags<input id="clip-edit-hashtags" maxlength="500" placeholder="#shorts #topic"></label><label>Language<input id="clip-edit-language" maxlength="20" placeholder="en, id, ..."></label></div><div class="clip-editor-footer"><p id="clip-preview-message" role="status">Loading private source video…</p><button type="button" class="primary-button" id="clip-save-btn">Save edits</button></div><small class="clip-preview-note">Saving creates a new metadata version and updates the cut points. It does not render a new video or publish anything.</small></dialog>';
     $(".page-heading").after(panel);
     $("#refresh-clips-btn").addEventListener("click",load);
     $("#clip-preview-close").addEventListener("click",closePreview);
     $("#clip-preview-dialog").addEventListener("click",event=>{if(event.target.id==="clip-preview-dialog")closePreview();});
     $("#clip-play-btn").addEventListener("click",playCut);
+    $("#clip-save-btn").addEventListener("click",saveEdits);
     $("#clip-start").addEventListener("change",updateTrim);
     $("#clip-end").addEventListener("change",updateTrim);
     $("#clip-preview-video").addEventListener("timeupdate",()=>{
-      const video=$("#clip-preview-video");
-      if(stopAtEnd&&activeClip&&video.currentTime>=clipEnd){video.pause();video.currentTime=clipEnd;}
+      const video=$("#clip-preview-video");if(activeClip&&video.currentTime>=clipEnd){video.pause();video.currentTime=clipEnd;}
     });
     $("#clip-preview-video").addEventListener("loadedmetadata",()=>{
       if(!activeClip)return;
-      clipStart=Math.max(0,Math.min(clipStart,Math.max(0,$("#clip-preview-video").duration-0.1)));
-      clipEnd=Math.min(clipEnd,$("#clip-preview-video").duration);
-      if(clipEnd<=clipStart)clipEnd=Math.min($("#clip-preview-video").duration,clipStart+1);
-      syncTrimInputs();
-      $("#clip-preview-message").textContent="Ready · "+time(clipStart)+" to "+time(clipEnd)+" · "+(clipEnd-clipStart).toFixed(1)+" seconds";
+      const duration=$("#clip-preview-video").duration;
+      clipStart=Math.max(0,Math.min(clipStart,Math.max(0,duration-0.1)));
+      clipEnd=Math.min(clipEnd,duration);if(clipEnd<=clipStart)clipEnd=Math.min(duration,clipStart+1);
+      syncTrimInputs();$("#clip-preview-message").textContent="Ready · "+time(clipStart)+" to "+time(clipEnd)+" · "+(clipEnd-clipStart).toFixed(1)+" seconds";
     });
-    $("#clip-preview-video").addEventListener("error",()=>{
-      $("#clip-preview-message").textContent="Could not play this source. Check that the original video codec is supported by your browser.";
-      $("#clip-preview-message").classList.add("error-text");
-    });
+    $("#clip-preview-video").addEventListener("error",()=>{$("#clip-preview-message").textContent="Could not play this source. Check browser codec support.";});
   }
-
   function syncTrimInputs(){
-    $("#clip-start").value=clipStart.toFixed(1);
-    $("#clip-end").value=clipEnd.toFixed(1);
-    $("#clip-start").max=Math.max(0,clipEnd-0.1).toFixed(1);
-    $("#clip-end").min=(clipStart+0.1).toFixed(1);
+    $("#clip-start").value=clipStart.toFixed(1);$("#clip-end").value=clipEnd.toFixed(1);
+    $("#clip-start").max=Math.max(0,clipEnd-0.1).toFixed(1);$("#clip-end").min=(clipStart+0.1).toFixed(1);
   }
   function updateTrim(){
-    const video=$("#clip-preview-video");
-    const duration=Number(video.duration)||Number(activeClip?.sourceDuration)||Infinity;
-    const nextStart=Number($("#clip-start").value);
-    const nextEnd=Number($("#clip-end").value);
-    if(!Number.isFinite(nextStart)||!Number.isFinite(nextEnd)||nextStart<0||nextEnd<=nextStart||nextEnd>duration){
-      $("#clip-preview-message").textContent="Enter a valid start and end within the source video.";
-      syncTrimInputs();
-      return;
+    const duration=Number($("#clip-preview-video").duration)||Number(activeClip?.sourceDuration)||Infinity;
+    const start=Number($("#clip-start").value),end=Number($("#clip-end").value);
+    if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start||end>duration||end-start<1||end-start>180){
+      $("#clip-preview-message").textContent="Cut must be 1–180 seconds and stay within the source video.";syncTrimInputs();return;
     }
-    clipStart=nextStart;clipEnd=nextEnd;video.pause();video.currentTime=clipStart;syncTrimInputs();
-    $("#clip-preview-message").textContent="Preview cut updated · "+(clipEnd-clipStart).toFixed(1)+" seconds · not saved";
+    clipStart=start;clipEnd=end;const video=$("#clip-preview-video");video.pause();video.currentTime=clipStart;syncTrimInputs();
+    $("#clip-preview-message").textContent="Cut adjusted · "+(clipEnd-clipStart).toFixed(1)+" sec · unsaved";
   }
   function playCut(){
-    const video=$("#clip-preview-video");
-    if(!activeClip)return;
-    stopAtEnd=true;video.currentTime=clipStart;
-    const promise=video.play();
-    if(promise?.catch)promise.catch(()=>{$("#clip-preview-message").textContent="Press play on the video to start preview.";});
+    if(!activeClip)return;const video=$("#clip-preview-video");video.currentTime=clipStart;
+    const promise=video.play();if(promise?.catch)promise.catch(()=>{$("#clip-preview-message").textContent="Press play on the video to start preview.";});
   }
   function closePreview(){
-    const dialog=$("#clip-preview-dialog"),video=$("#clip-preview-video");
-    video.pause();video.removeAttribute("src");video.load();activeClip=null;
+    const dialog=$("#clip-preview-dialog"),video=$("#clip-preview-video");video.pause();video.removeAttribute("src");video.load();activeClip=null;
     if(dialog?.close)dialog.close();else dialog?.removeAttribute("open");
   }
   function openClipPreview(clip){
-    activeClip=clip;clipStart=Number(clip.startSeconds)||0;clipEnd=Number(clip.endSeconds)||clipStart+1;stopAtEnd=true;
-    const video=$("#clip-preview-video"),message=$("#clip-preview-message");
-    video.pause();video.removeAttribute("src");video.load();
-    $("#clip-preview-title").textContent=clip.title||"Clip preview";
-    $("#clip-preview-source").textContent=(clip.sourceTitle||"Source video")+" · AI score "+Math.round(Number(clip.score)||0)+"/100";
-    message.classList.remove("error-text");message.textContent="Loading private source video…";
-    syncTrimInputs();
-    video.src="/api/sources/"+encodeURIComponent(clip.sourceId);
-    const dialog=$("#clip-preview-dialog");
-    if(typeof dialog.showModal==="function")dialog.showModal();else dialog.setAttribute("open","");
-    video.load();
-    video.addEventListener("loadedmetadata",function seekStart(){video.removeEventListener("loadedmetadata",seekStart);if(activeClip)video.currentTime=clipStart;},{once:true});
+    activeClip=clip;clipStart=Number(clip.startSeconds)||0;clipEnd=Number(clip.endSeconds)||clipStart+1;
+    const video=$("#clip-preview-video");video.pause();video.removeAttribute("src");video.load();
+    $("#clip-preview-title").textContent="Edit clip";
+    $("#clip-preview-source").textContent=(clip.sourceTitle||"Source video")+" · AI score "+Math.round(Number(clip.score)||0)+"/100 · metadata v"+(clip.metadataVersion||0);
+    $("#clip-edit-title").value=clip.title||"";$("#clip-edit-caption").value=clip.caption||"";
+    $("#clip-edit-hashtags").value=clip.hashtags||"";$("#clip-edit-language").value=clip.language||"";
+    $("#clip-preview-message").textContent="Loading private source video…";$("#clip-save-btn").disabled=false;
+    syncTrimInputs();video.src="/api/sources/"+encodeURIComponent(clip.sourceId);
+    const dialog=$("#clip-preview-dialog");if(typeof dialog.showModal==="function")dialog.showModal();else dialog.setAttribute("open","");
+    video.load();video.addEventListener("loadedmetadata",function seekStart(){video.removeEventListener("loadedmetadata",seekStart);if(activeClip)video.currentTime=clipStart;},{once:true});
   }
-
-  async function load() {
-    const list=$("#clips-list");
-    if(!list)return;
-    list.innerHTML='<div class="sources-empty"><b>Loading clip candidates…</b></div>';
-    try {
-      const response=await fetch("/api/clips",{headers:{accept:"application/json"}});
-      const data=await response.json();
+  async function saveEdits(){
+    if(!activeClip||busy)return;
+    const title=$("#clip-edit-title").value.trim(),caption=$("#clip-edit-caption").value.trim();
+    const hashtags=$("#clip-edit-hashtags").value.trim(),language=$("#clip-edit-language").value.trim();
+    if(!title){$("#clip-preview-message").textContent="Clip title is required.";return;}
+    busy=true;const button=$("#clip-save-btn");button.disabled=true;button.textContent="Saving…";
+    try{
+      const response=await fetch("/api/clips",{method:"PATCH",headers:{"content-type":"application/json","accept":"application/json"},body:JSON.stringify({clipId:activeClip.id,startSeconds:clipStart,endSeconds:clipEnd,title,caption,hashtags,language})});
+      const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not save edits.");
+      $("#clip-preview-message").textContent="Saved successfully · metadata v"+data.clip.metadataVersion+" · "+(clipEnd-clipStart).toFixed(1)+" sec";
+      await load();
+      const updated=(window.__shortsflowClipCache||[]).find(item=>item.id===activeClip?.id);
+      if(updated)activeClip=updated;
+    }catch(error){$("#clip-preview-message").textContent=error.message;}
+    finally{busy=false;button.disabled=false;button.textContent="Save edits";}
+  }
+  async function load(){
+    const list=$("#clips-list");if(!list)return;list.innerHTML='<div class="sources-empty"><b>Loading clip candidates…</b></div>';
+    try{
+      const response=await fetch("/api/clips",{headers:{accept:"application/json"}}),data=await response.json();
       if(!response.ok||!data.ok)throw new Error(data.error||"Could not load clip candidates.");
-      const clips=Array.isArray(data.clips)?data.clips:[];
+      const clips=Array.isArray(data.clips)?data.clips:[];window.__shortsflowClipCache=clips;
       $("#clips-total").textContent=clips.length+" candidate"+(clips.length===1?"":"s");
-      if(!clips.length) {
-        list.innerHTML='<div class="sources-empty"><b>No clip candidates yet</b><p>Upload an MP4 source and queue analysis. After transcription, ShortsFlow will automatically identify and rank potential clips here.</p></div>';
-        return;
-      }
+      if(!clips.length){list.innerHTML='<div class="sources-empty"><b>No clip candidates yet</b><p>Upload an MP4 source and queue analysis. After transcription, AI will identify potential clips here.</p></div>';return;}
       list.innerHTML=clips.map((clip,index)=>{
         const score=Math.max(0,Math.min(100,Math.round(Number(clip.score)||0)));
-        return '<article class="clip-candidate"><div class="clip-rank">#'+(index+1)+'</div><div class="clip-main"><div class="clip-title-row"><div><strong>'+esc(clip.title||"Untitled moment")+'</strong><small>'+esc(clip.sourceTitle||"Source video")+'</small></div><span class="clip-score">'+score+'<small>/100</small></span></div><p class="clip-hook">'+esc(clip.hook||"")+'</p><p class="clip-transcript">'+esc(clip.transcript||"")+'</p><div class="clip-meta"><span>'+time(clip.startSeconds)+' – '+time(clip.endSeconds)+'</span><span>'+Math.round(Number(clip.durationSeconds)||0)+' sec</span><span>'+esc(clip.status||"discovered")+'</span></div>'+(clip.caption?'<p class="clip-caption">'+esc(clip.caption)+'</p>':'')+(clip.hashtags?'<small class="clip-hashtags">'+esc(clip.hashtags)+'</small>':'')+'<div class="clip-actions"><button type="button" class="text-button clip-preview-btn" data-clip-id="'+esc(clip.id)+'">▶ Preview cut</button></div></div></article>';
+        return '<article class="clip-candidate"><div class="clip-rank">#'+(index+1)+'</div><div class="clip-main"><div class="clip-title-row"><div><strong>'+esc(clip.title||"Untitled moment")+'</strong><small>'+esc(clip.sourceTitle||"Source video")+'</small></div><span class="clip-score">'+score+'<small>/100</small></span></div><p class="clip-hook">'+esc(clip.hook||"")+'</p><p class="clip-transcript">'+esc(clip.transcript||"")+'</p><div class="clip-meta"><span>'+time(clip.startSeconds)+' – '+time(clip.endSeconds)+'</span><span>'+Math.round(Number(clip.durationSeconds)||0)+' sec</span><span>'+esc(clip.status||"discovered")+'</span></div>'+(clip.caption?'<p class="clip-caption">'+esc(clip.caption)+'</p>':'')+(clip.hashtags?'<small class="clip-hashtags">'+esc(clip.hashtags)+'</small>':'')+'<div class="clip-actions"><button type="button" class="text-button clip-preview-btn" data-clip-id="'+esc(clip.id)+'">▶ Preview & edit</button></div></div></article>';
       }).join("");
       const byId=new Map(clips.map(clip=>[String(clip.id),clip]));
       list.querySelectorAll(".clip-preview-btn").forEach(button=>button.addEventListener("click",()=>{const clip=byId.get(button.dataset.clipId);if(clip)openClipPreview(clip);}));
-    } catch(error) {
-      list.innerHTML='<div class="sources-empty error"><b>Could not load clip candidates</b><p>'+esc(error.message)+'</p></div>';
-    }
+    }catch(error){list.innerHTML='<div class="sources-empty error"><b>Could not load clip candidates</b><p>'+esc(error.message)+'</p></div>';}
   }
-
   document.addEventListener("DOMContentLoaded",()=>{
     ensurePanel();
-    document.addEventListener("shortsflow:view",event=>{
-      if(event.detail?.view!=="clips")return;
-      ensurePanel();
-      $("#clips-workspace").classList.remove("hidden");
-      load();
-    });
-    window.setInterval(()=>{
-      const panel=$("#clips-workspace");
-      if(panel&&!panel.classList.contains("hidden"))load();
-    },20000);
+    document.addEventListener("shortsflow:view",event=>{if(event.detail?.view!=="clips")return;ensurePanel();$("#clips-workspace").classList.remove("hidden");load();});
+    window.setInterval(()=>{const panel=$("#clips-workspace");if(panel&&!panel.classList.contains("hidden")&&!$("#clip-preview-dialog")?.open)load();},20000);
   });
 })();
