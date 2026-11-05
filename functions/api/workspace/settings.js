@@ -1,6 +1,6 @@
 import { json, getSessionUser, readJson } from "../_lib/auth.js";
 
-const positions = new Set(["top-left","top-right","bottom-left","bottom-right"]);
+const positions = new Set(["top-left","top-center","top-right","center","bottom-left","bottom-center","bottom-right"]);
 const scales = new Set(["small","medium","large"]);
 export async function onRequestGet({request,env}) {
   if(!env.DB) return json({ok:false,error:"Database is not configured."},503);
