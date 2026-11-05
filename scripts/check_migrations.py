@@ -38,6 +38,8 @@ required = {
     "processing_jobs",
     "source_transcripts",
     "ai_usage_daily",
+    "youtube_connections",
+    "youtube_oauth_states",
 }
 missing = required - tables
 if missing:
@@ -92,11 +94,11 @@ except sqlite3.IntegrityError:
 else:
     raise SystemExit("Email uniqueness check failed")
 
+publish_columns = {row[1] for row in connection.execute("PRAGMA table_info(publishing_jobs)")}
+for required_column in ("render_asset_id", "metadata_version", "title", "description", "privacy_status", "tags_json"):
+    if required_column not in publish_columns:
+        raise SystemExit(f"publishing_jobs.{required_column} is missing")
+
 connection.commit()
 connection.close()
 print(f"OK: {len(MIGRATIONS)} migrations applied; required tables and constraints verified.")
-connection.execute("PRAGMA table_info(publishing_jobs)")
-publish_columns = {row[1] for row in connection.execute("PRAGMA table_info(publishing_jobs)")}
-for required in ("render_asset_id", "metadata_version", "title", "description", "privacy_status", "tags_json"):
-    if required not in publish_columns:
-        raise SystemExit(f"publishing_jobs.{required} is missing")
