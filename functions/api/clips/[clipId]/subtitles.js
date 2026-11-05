@@ -1,4 +1,4 @@
-import { json, getSessionUser, readJson } from "../_lib/auth.js";
+import { json, getSessionUser, readJson } from "../../_lib/auth.js";
 
 const ID = /^[0-9a-f-]{36}$/i;
 const DEFAULTS = { enabled: true, preset: "pop", fontSize: 28, color: "#ffffff", highlight: "#b59aff", position: "bottom", background: true };
