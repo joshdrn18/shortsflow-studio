@@ -37,7 +37,9 @@ Heavy video processing will not run inside request-bound Pages Functions. A sepa
 - Workspace created for each new account
 - D1 schema and ordered migrations, including workspace watermark settings
 - Authenticated source-video upload to private R2 (MP4, MOV, WebM, MKV, OGG; 90 MB endpoint limit)
-- Workspace-scoped source-video listing API
+- Workspace-scoped source-video listing and private streaming preview API with HTTP byte-range support
+- Source preview player in the Sources workspace
+- Persistent, workspace-scoped processing job queue for source-analysis requests (queue storage only; no worker consumes jobs yet)
 - Workspace watermark settings API and 9:16 preview controls
 
 The dashboard does not pretend that upload, AI processing, rendering, or YouTube publishing is active before those services are configured.
@@ -59,7 +61,7 @@ Apply D1 migrations in order from the repository root:
 npx wrangler d1 migrations apply <DATABASE_NAME> --remote
 ```
 
-Wrangler reads the SQL files from `migrations/`. Apply migrations in order: `0001_initial.sql`, `0002_auth.sql`, then `0003_workspace_settings.sql`. Do not apply `database/schema.sql` as well; it is a reference copy of the original base schema. Bind the private R2 bucket to Pages Functions as `MEDIA`.
+Wrangler reads the SQL files from `migrations/`. Apply migrations in order: `0001_initial.sql`, `0002_auth.sql`, `0003_workspace_settings.sql`, then `0004_processing_jobs.sql`. Do not apply `database/schema.sql` as well; it is a reference copy of the original base schema. Bind the private R2 bucket to Pages Functions as `MEDIA`.
 
 After binding D1 and applying migrations, deploy the Pages project and verify:
 
@@ -79,4 +81,4 @@ After binding D1 and applying migrations, deploy the Pages project and verify:
 
 ## Not implemented yet
 
-AI clip discovery, transcript/subtitle generation, actual watermark burn-in, video rendering, Review Center actions, YouTube OAuth, publishing queue workers and analytics. Source upload and watermark configuration are implemented, but must still be verified against the deployed Pages runtime and D1/R2 bindings.
+AI clip discovery, transcript/subtitle generation, actual watermark burn-in, video rendering, Review Center actions, YouTube OAuth, publishing queue workers and analytics. Source upload, private video streaming preview and watermark configuration are implemented. End-to-end browser verification with a real uploaded video is still pending.
