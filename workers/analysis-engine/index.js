@@ -189,7 +189,7 @@ async function processNextJob(env) {
     const current = await env.DB.prepare(
       "SELECT transcript_text, segments_json FROM source_transcripts WHERE id = ? AND workspace_id = ?"
     ).bind(transcriptId, job.workspace_id).first();
-    const priorText = String(current?.transcript_text || "");
+    const priorText = String(current?.transcript_text || "");\n    const language = String(result?.transcription_info?.language || result?.language || "") || null;
     const nextText = [priorText, String(result?.text || "").trim()].filter(Boolean).join(" ").slice(0, 250000);
     let priorWords = [];
     try { priorWords = JSON.parse(current?.segments_json || "[]"); } catch { priorWords = []; }
@@ -206,8 +206,8 @@ async function processNextJob(env) {
 
     await env.DB.batch([
       env.DB.prepare(
-        "UPDATE source_transcripts SET transcript_text = ?, segments_json = ?, status = 'processing', error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
-      ).bind(nextText, JSON.stringify(nextWords), now, transcriptId, job.workspace_id),
+        "UPDATE source_transcripts SET transcript_text = ?, segments_json = ?, language = COALESCE(?, language), status = 'processing', error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
+      ).bind(nextText, JSON.stringify(nextWords), language, now, transcriptId, job.workspace_id),
       env.DB.prepare(
         "UPDATE processing_jobs SET status = 'running', payload_json = ?, available_at = ?, locked_until = NULL, locked_by = NULL, last_error = NULL, updated_at = ? WHERE id = ?"
       ).bind(JSON.stringify(payload), now, now, job.id)
@@ -225,7 +225,7 @@ async function completeTranscript(env, job, payload, transcriptId) {
   const now = new Date().toISOString();
   await env.DB.batch([
     env.DB.prepare(
-      "UPDATE source_transcripts SET status = 'completed', error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
+      "UPDATE source_transcripts SET status = 'completed', audio_duration_seconds = COALESCE(?, audio_duration_seconds), error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
     ).bind(now, transcriptId, job.workspace_id),
     env.DB.prepare(
       "UPDATE source_videos SET status = 'ready', error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
