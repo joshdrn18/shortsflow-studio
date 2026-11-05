@@ -38,8 +38,8 @@ export async function onRequestPost({ request, env }) {
     try {
       await env.DB.prepare(
         `INSERT INTO source_videos
-         (id, workspace_id, title, source_type, storage_key, mime_type, size_bytes, status, created_at, updated_at)
-         VALUES (?, ?, ?, 'upload', ?, ?, ?, 'uploaded', ?, ?)`
+         (id, workspace_id, title, source_type, storage_key, mime_type, size_bytes, duration_seconds, status, created_at, updated_at)
+         VALUES (?, ?, ?, 'upload', ?, ?, ?, ?, 'uploaded', ?, ?)`
       ).bind(id, user.workspace.id, title, key, contentType, size, durationSeconds, now, now).run();
     } catch (databaseError) {
       await env.MEDIA.delete(key);
