@@ -1,0 +1,47 @@
+import { json, getSessionUser, readJson } from "../_lib/auth.js";
+const ID=/^[0-9a-f-]{36}$/i;
+export async function onRequestGet({request,env}){
+ const user=await getSessionUser(request,env);if(!user?.workspace?.id)return json({ok:false,error:"Authentication required."},401);
+ try{
+  const connection=await env.DB.prepare("SELECT channel_id,channel_title,channel_thumbnail_url,connected_at FROM youtube_connections WHERE workspace_id=?").bind(user.workspace.id).first();
+  const jobs=await env.DB.prepare(`SELECT p.id,p.clip_id,p.status,p.scheduled_at,p.platform_video_id,p.platform_url,p.title,p.description,p.privacy_status,p.attempts,p.last_error,p.created_at,p.render_asset_id,p.metadata_version,c.title AS clip_title FROM publishing_jobs p JOIN clips c ON c.id=p.clip_id WHERE c.workspace_id=? AND p.platform='youtube' ORDER BY COALESCE(p.scheduled_at,p.created_at) DESC LIMIT 100`).bind(user.workspace.id).all();
+  const approved=await env.DB.prepare(`SELECT COUNT(*) AS count FROM clips c JOIN clip_metadata m ON m.clip_id=c.id AND m.version=(SELECT MAX(version) FROM clip_metadata WHERE clip_id=c.id) JOIN clip_assets a ON a.clip_id=c.id AND a.asset_type='render' AND a.version=(SELECT MAX(version) FROM clip_assets WHERE clip_id=c.id AND asset_type='render') JOIN clip_reviews r ON r.clip_id=c.id AND r.render_asset_id=a.id AND r.metadata_version=m.version AND r.decision='approved' WHERE c.workspace_id=? AND a.metadata_version=m.version AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.clip_id=c.id AND p.render_asset_id=a.id AND p.status IN ('queued','uploading','processing','published'))`).bind(user.workspace.id).first();
+  return json({ok:true,connection:connection?{connected:true,channelId:connection.channel_id,channelTitle:connection.channel_title,thumbnailUrl:connection.channel_thumbnail_url,connectedAt:connection.connected_at}:{connected:false},jobs:jobs.results||[],eligibleCount:Number(approved?.count||0)});
+ }catch(e){console.error("youtube_publisher_list",e);return json({ok:false,error:"Could not load publisher data."},503);}
+}
+export async function onRequestPost({request,env}){
+ const user=await getSessionUser(request,env);if(!user?.workspace?.id)return json({ok:false,error:"Authentication required."},401);
+ const body=await readJson(request),clipId=String(body?.clipId||""),title=String(body?.title||"").trim(),description=String(body?.description||"").trim(),privacy=String(body?.privacyStatus||"private");
+ const scheduledAt=body?.scheduledAt?new Date(body.scheduledAt):null;
+ const tags=Array.isArray(body?.tags)?body.tags.map(x=>String(x).trim()).filter(Boolean).slice(0,30):[];
+ if(!ID.test(clipId))return json({ok:false,error:"Choose a valid clip."},400);
+ if(!title||title.length>100)return json({ok:false,error:"YouTube title must contain 1–100 characters."},400);
+ if(description.length>5000)return json({ok:false,error:"Description must be 5,000 characters or fewer."},400);
+ if(!["private","unlisted","public"].includes(privacy))return json({ok:false,error:"Invalid privacy setting."},400);
+ if(body?.scheduledAt&&(!scheduledAt||!Number.isFinite(scheduledAt.getTime())||scheduledAt.getTime()<Date.now()+60000))return json({ok:false,error:"Choose a schedule at least one minute in the future."},400);
+ try{
+  const channel=await env.DB.prepare("SELECT id FROM youtube_connections WHERE workspace_id=?").bind(user.workspace.id).first();
+  if(!channel)return json({ok:false,error:"Connect a YouTube channel before scheduling uploads."},409);
+  const clip=await env.DB.prepare(`SELECT c.id,c.status,m.version AS metadata_version,a.id AS asset_id,a.version AS asset_version,a.metadata_version AS asset_metadata_version,r.id AS review_id
+   FROM clips c JOIN clip_metadata m ON m.clip_id=c.id AND m.version=(SELECT MAX(version) FROM clip_metadata WHERE clip_id=c.id)
+   JOIN clip_assets a ON a.clip_id=c.id AND a.asset_type='render' AND a.version=(SELECT MAX(version) FROM clip_assets WHERE clip_id=c.id AND asset_type='render')
+   JOIN clip_reviews r ON r.clip_id=c.id AND r.render_asset_id=a.id AND r.metadata_version=m.version AND r.decision='approved'
+   WHERE c.id=? AND c.workspace_id=? AND a.metadata_version=m.version ORDER BY r.reviewed_at DESC LIMIT 1`).bind(clipId,user.workspace.id).first();
+  if(!clip)return json({ok:false,error:"This clip has no approval for its latest render. Review and approve the current version first."},409);
+  const duplicate=await env.DB.prepare("SELECT id FROM publishing_jobs WHERE clip_id=? AND render_asset_id=? AND status IN ('queued','uploading','processing','published') LIMIT 1").bind(clipId,clip.asset_id).first();
+  if(duplicate)return json({ok:false,error:"This exact render already has a publishing job."},409);
+  const id=crypto.randomUUID(),now=new Date().toISOString(),when=scheduledAt?scheduledAt.toISOString():now;
+  await env.DB.prepare(`INSERT INTO publishing_jobs (id,clip_id,review_id,platform,status,scheduled_at,created_at,updated_at,render_asset_id,metadata_version,title,description,privacy_status,tags_json)
+   VALUES (?,?,?,'youtube','queued',?,?,?,?,?,?,?,?,?)`).bind(id,clipId,clip.review_id,when,now,now,clip.asset_id,clip.metadata_version,title,description,privacy,JSON.stringify(tags)).run();
+  await env.DB.prepare("UPDATE clips SET status='publishing',updated_at=? WHERE id=? AND workspace_id=?").bind(now,clipId,user.workspace.id).run();
+  await env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(),user.workspace.id,"clip",clipId,"youtube_publish_queued",JSON.stringify({jobId:id,assetId:clip.asset_id,scheduledAt:when,privacyStatus:privacy}),now).run();
+  return json({ok:true,job:{id,clipId,renderAssetId:clip.asset_id,status:"queued",scheduledAt:when,privacyStatus:privacy}},201);
+ }catch(e){console.error("youtube_publish_queue",e);return json({ok:false,error:"Could not schedule this YouTube upload."},503);}
+}
+export async function onRequestDelete({request,env}){
+ const user=await getSessionUser(request,env);if(!user?.workspace?.id)return json({ok:false,error:"Authentication required."},401);
+ const url=new URL(request.url),id=url.searchParams.get("id");if(!ID.test(id||""))return json({ok:false,error:"Invalid publishing job ID."},400);
+ const result=await env.DB.prepare("UPDATE publishing_jobs SET status='cancelled',updated_at=? WHERE id=? AND status='queued' AND clip_id IN (SELECT id FROM clips WHERE workspace_id=?)").bind(new Date().toISOString(),id,user.workspace.id).run();
+ if(!result.meta?.changes)return json({ok:false,error:"Only queued jobs can be cancelled."},409);
+ return json({ok:true,cancelled:true});
+}
