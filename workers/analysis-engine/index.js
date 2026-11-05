@@ -273,7 +273,7 @@ async function processClipDiscovery(env, job) {
   const system = "You are an expert short-form video editor. Identify the strongest self-contained moments from a transcript. Never invent speech or timestamps. Return valid JSON only.";
   const prompt = "Select 5 to 15 distinct short-form clip candidates from this transcript. Each clip must be 15 to 60 seconds, have a strong opening hook, make sense without extra context, and end on a complete thought or payoff. Prefer useful, surprising, emotional, funny, story-driven, or high-retention moments. Avoid long pauses, greetings, repeated content, and clips that need missing context. Choose startSeconds and endSeconds from the supplied word timestamps, not guesses. Do not make candidates overlap substantially. Rank the strongest first. Return this exact JSON shape: {\"candidates\":[{\"startSeconds\":12.3,\"endSeconds\":42.8,\"title\":\"Short title\",\"hook\":\"Opening hook\",\"reason\":\"Why this moment works\",\"caption\":\"Short social caption\",\"hashtags\":[\"#shorts\",\"#topic\"],\"score\":91}]}. Source duration: " + duration.toFixed(2) + " seconds. Transcript language: " + (transcript.language || "auto-detected") + ". Timestamped transcript: " + timeline;
 
-  const estimatedInputTokens = Math.ceil((system.length + prompt.length) / 4);
+  const estimatedInputTokens = Math.ceil((system.length + prompt.length) / 3);
   const withinBudget = await reserveTextBudget(env, estimatedInputTokens, 2400);
   if (!withinBudget) {
     const nextUtcDay = new Date();
