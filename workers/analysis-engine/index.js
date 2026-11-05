@@ -131,6 +131,18 @@ async function processNextJob(env) {
   if (!env.DB || !env.SOURCE_MEDIA || !env.MEDIA_TRANSFORM || !env.AI) return;
   const job = await claimJob(env);
   if (!job) return;
+  if (job.job_type === "discover_clips") {
+    try {
+      await processClipDiscovery(env, job);
+    } catch (error) {
+      await failJob(env, job, null, error?.message || "Clip discovery failed.");
+    }
+    return;
+  }
+  if (job.job_type !== "analyze_source") {
+    await failJob(env, job, null, "Unsupported analysis job type.");
+    return;
+  }
 
   let payload = parsePayload(job.payload_json);
   let transcriptId = payload.transcriptId || null;
