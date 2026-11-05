@@ -12,7 +12,7 @@ export async function onRequestGet({ request, env }) {
        FROM source_videos s WHERE s.workspace_id = ? ORDER BY s.created_at DESC LIMIT 100`
     ).bind(user.workspace.id).all();
     return json({ ok: true, sources: (result.results || []).map((row) => ({
-      id: row.id, title: row.title, mimeType: row.mime_type, sizeBytes: row.size_bytes, durationSeconds: row.duration_seconds,
+      id: row.id, title: row.title, mimeType: row.mime_type, sizeBytes: row.size_bytes, durationSeconds: row.duration_seconds, transcriptStatus: row.transcript_status,
       status: row.status, createdAt: row.created_at
     })) });
   } catch {
