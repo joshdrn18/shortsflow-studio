@@ -41,6 +41,7 @@ Heavy video processing will not run inside request-bound Pages Functions. A sepa
 - Source preview player in the Sources workspace
 - Persistent, workspace-scoped processing job queue for source-analysis requests, with safe cancellation of queued jobs and manual retry of failed jobs
 - Scheduled analysis Worker using Cloudflare Media Transformations (beta) to extract audio from private R2 MP4 sources and Workers AI Whisper to create timestamped transcripts
+- Secure workspace-scoped transcript viewer with timestamped WebVTT export
 - Versioned source-transcript storage and a daily app-level safety budget capped at 8,000 estimated Whisper Neurons
 - Workspace watermark settings API and 9:16 preview controls
 
@@ -83,7 +84,7 @@ After binding D1 and applying migrations, deploy the Pages project and verify:
 
 ## Not implemented yet
 
-AI clip discovery and scoring, subtitle generation and word-highlighting UI, actual watermark burn-in, video rendering, Review Center actions, YouTube OAuth, publishing queue workers and analytics. Transcription is active for MP4 (H.264/AAC) sources up to 10 minutes and 90 MB; other uploaded formats remain available for private storage and preview but are not supported by the current analysis Worker. Source upload, private video streaming preview and watermark configuration are implemented. End-to-end browser verification with a real uploaded video is still pending.
+AI clip discovery and scoring, in-editor subtitle styling and word-highlighting UI, actual watermark burn-in, video rendering, Review Center actions, YouTube OAuth, publishing queue workers and analytics. Transcription is active for MP4 (H.264/AAC) sources up to 10 minutes and 90 MB; other uploaded formats remain available for private storage and preview but are not supported by the current analysis Worker. Source upload, private video streaming preview and watermark configuration are implemented. End-to-end browser verification with a real uploaded video is still pending.
 
 ## Analysis engine
 
