@@ -391,40 +391,45 @@ async function processClipDiscovery(env, job) {
   }
 
   const duration = Number(transcript.audio_duration_seconds || 0);
-  const timeline = words.map(w => "[" + Number(w.start).toFixed(2) + "-" + Number(w.end).toFixed(2) + "] " + String(w.word || "")).join(" ");
-  const system = "You are an expert short-form video editor. Identify the strongest self-contained moments from a transcript. Never invent speech or timestamps. Return valid JSON only.";
-  const prompt = "Select 5 to 15 distinct short-form clip candidates from this transcript. Each clip must be 15 to 60 seconds, have a strong opening hook, make sense without extra context, and end on a complete thought or payoff. Prefer useful, surprising, emotional, funny, story-driven, or high-retention moments. Avoid long pauses, greetings, repeated content, and clips that need missing context. Choose startSeconds and endSeconds from the supplied word timestamps, not guesses. Do not make candidates overlap substantially. Rank the strongest first. Return this exact JSON shape: {\"candidates\":[{\"startSeconds\":12.3,\"endSeconds\":42.8,\"title\":\"Short title\",\"hook\":\"Opening hook\",\"reason\":\"Why this moment works\",\"caption\":\"Short social caption\",\"hashtags\":[\"#shorts\",\"#topic\"],\"score\":91}]}. Source duration: " + duration.toFixed(2) + " seconds. Transcript language: " + (transcript.language || "auto-detected") + ". Timestamped transcript: " + timeline;
-
-  const estimatedInputTokens = Math.ceil((system.length + prompt.length) / 3);
-  const withinBudget = await reserveTextBudget(env, estimatedInputTokens, 4400);
-  if (!withinBudget) {
-    const nextUtcDay = new Date();
-    nextUtcDay.setUTCHours(24, 0, 5, 0);
-    await env.DB.prepare(
-      "UPDATE processing_jobs SET status = 'queued', available_at = ?, locked_until = NULL, locked_by = NULL, last_error = ?, updated_at = ? WHERE id = ?"
-    ).bind(nextUtcDay.toISOString(), "Daily AI safety budget reached; clip discovery will resume after the UTC reset.", new Date().toISOString(), job.id).run();
-    return;
+  const system = "You are an expert short-form video editor. Identify self-contained, high-retention moments from timestamped speech. Never invent speech or timestamps. Return valid JSON only.";
+  // Split long transcripts into overlapping windows so one model response cannot crowd out
+  // every candidate. Each window independently searches for 1–3 distinct moments.
+  const WINDOW_SECONDS = 150;
+  const OVERLAP_SECONDS = 30;
+  const windows = [];
+  for (let from = 0; from < duration; from += WINDOW_SECONDS - OVERLAP_SECONDS) {
+    const to = Math.min(duration, from + WINDOW_SECONDS);
+    const windowWords = words.filter(w => Number(w.start) >= from && Number(w.start) < to);
+    if (windowWords.length >= 12) windows.push({ from, to, words: windowWords });
+    if (to >= duration) break;
   }
-
-  const runClipSelector = (userPrompt, tokenLimit) => env.AI.run(CLIP_MODEL, {
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: userPrompt }
-    ],
-    max_tokens: tokenLimit,
-    temperature: 0.1,
-    response_format: { type: 'json_object' }
-  });
-
-  let result = await runClipSelector(prompt, 2400);
-  let candidates = parseClipSelectorResponse(result);
-  if (!Array.isArray(candidates) || candidates.length === 0) {
-    const retryPrompt = prompt + '\n\nIMPORTANT: Your previous response was not valid JSON. Return only a compact valid JSON object with a top-level candidates array. Include no markdown or explanation. Return at most 8 candidates and keep title, hook, reason and caption concise.';
-    result = await runClipSelector(retryPrompt, 2000);
-    candidates = parseClipSelectorResponse(result);
+  const candidates = [];
+  for (const window of windows) {
+    const timeline = window.words.map(w => "[" + Number(w.start).toFixed(2) + "-" + Number(w.end).toFixed(2) + "] " + String(w.word || "")).join(" ");
+    const prompt = "Find 1 to 3 of the strongest distinct short-form clips inside this transcript window. Each must be 15–60 seconds, start with a compelling hook, make sense on its own, and end on a complete thought, joke, reveal, or payoff. Prefer meaningful moments; avoid greetings, filler, repeated lines and incomplete sentences. Use ONLY the supplied absolute word timestamps. Return fewer only if this window truly has fewer viable moments. Rank strongest first. Return compact JSON only: {\\"candidates\\":[{\\"startSeconds\\":12.3,\\"endSeconds\\":42.8,\\"title\\":\\"Specific engaging title\\",\\"hook\\":\\"Opening line\\",\\"reason\\":\\"Why this moment works\\",\\"caption\\":\\"Short caption\\",\\"hashtags\\":[\\"#shorts\\",\\"#topic\\"],\\"score\\":91}]}. Full source duration: " + duration.toFixed(2) + " seconds. Search window: " + window.from.toFixed(2) + "–" + window.to.toFixed(2) + " seconds. Transcript language: " + (transcript.language || "auto-detected") + ". Timestamped transcript: " + timeline;
+    const inputTokens = Math.ceil((system.length + prompt.length) / 3);
+    if (!await reserveTextBudget(env, inputTokens, 1100)) {
+      throw new Error("Daily AI safety budget reached during clip discovery. Retry after the UTC reset.");
+    }
+    let result = await env.AI.run(CLIP_MODEL, {
+      messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+      max_tokens: 1100, temperature: 0.15, response_format: { type: "json_object" }
+    });
+    let parsed = parseClipSelectorResponse(result);
+    if (!Array.isArray(parsed) || !parsed.length) {
+      const retry = prompt + "\\nReturn only a valid compact JSON object with a candidates array. Keep every field short.";
+      if (await reserveTextBudget(env, Math.ceil(retry.length / 3), 700)) {
+        result = await env.AI.run(CLIP_MODEL, {
+          messages: [{ role: "system", content: system }, { role: "user", content: retry }],
+          max_tokens: 700, temperature: 0.1, response_format: { type: "json_object" }
+        });
+        parsed = parseClipSelectorResponse(result);
+      }
+    }
+    if (Array.isArray(parsed)) candidates.push(...parsed);
   }
-  if (!Array.isArray(candidates) || candidates.length === 0) {
-    throw new Error('AI clip selector could not return valid candidate JSON after an automatic retry. Retry discovery.');
+  if (!candidates.length) {
+    throw new Error("AI clip selector could not find valid candidates in the transcript windows. Retry discovery.");
   }
 
   const existingResult = await env.DB.prepare(
