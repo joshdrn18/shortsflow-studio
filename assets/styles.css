@@ -31,3 +31,24 @@
 
 .source-transcript-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:min(65vh,680px);overflow:auto;padding:18px;margin:0;border:1px solid var(--line,#242733);border-radius:12px;background:var(--panel,#101218);color:var(--text,#f2f3f6);font:14px/1.8 ui-monospace,SFMono-Regular,Menlo,monospace}
 .view-transcript-btn:disabled{opacity:.35;cursor:not-allowed}
+
+.clips-workspace{display:grid;gap:14px}
+.clips-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 20px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}
+.clips-toolbar strong{font:700 14px Manrope,sans-serif}
+.clips-toolbar p{margin:5px 0 0;color:var(--muted);font-size:12px}
+.clips-list{display:grid;gap:11px}
+.clip-candidate{display:grid;grid-template-columns:42px minmax(0,1fr);gap:15px;padding:18px 20px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}
+.clip-rank{width:34px;height:34px;border-radius:10px;background:#211d32;color:#c5b4ff;display:grid;place-items:center;font:700 12px Manrope,sans-serif}
+.clip-main{min-width:0}
+.clip-title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+.clip-title-row strong{font:700 14px Manrope,sans-serif}
+.clip-title-row small{display:block;color:var(--muted);font-size:11px;margin-top:5px}
+.clip-score{flex:none;border:1px solid #3a3153;background:#1d1a2b;color:#c5b4ff;border-radius:8px;padding:6px 9px;font:700 13px Manrope,sans-serif}
+.clip-score small{display:inline;color:#9286b4;font:500 10px Manrope,sans-serif;margin-left:2px}
+.clip-hook{margin:13px 0 7px;color:#e6e1f5;font-size:13px;font-weight:600}
+.clip-transcript{margin:0;color:#aeb3c0;font-size:12px;line-height:1.65}
+.clip-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}
+.clip-meta span{border:1px solid var(--line);background:#151821;color:#9ca3b2;padding:5px 8px;border-radius:6px;font-size:10px}
+.clip-caption{margin:12px 0 4px;color:#c2c7d2;font-size:11px;line-height:1.6}
+.clip-hashtags{color:#9e8bdf;font-size:10px}
+@media(max-width:640px){.clip-candidate{grid-template-columns:32px minmax(0,1fr);gap:10px;padding:14px}.clip-rank{width:30px;height:30px}.clips-toolbar{padding:14px}.clip-title-row{gap:8px}}
