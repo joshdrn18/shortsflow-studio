@@ -23,3 +23,8 @@
 .source-preview-dialog>p{font-size:10px;color:var(--muted);margin:10px 2px 0;min-height:14px}
 .source-preview-dialog>p.error-text{color:#f19a9a}
 @media(max-width:680px){.source-row-actions{width:100%;margin-left:50px}.source-preview-dialog{padding:12px}.source-preview-head strong{font-size:12px}}
+
+.job-row-actions{display:flex;align-items:center;gap:8px;flex:none}
+.job-row-actions .text-button{font-size:12px;padding:7px 10px;border:1px solid var(--line,#242733);border-radius:8px}
+.job-row-actions .text-button:disabled{opacity:.55;cursor:wait}
+@media(max-width:680px){.job-row-actions{width:100%;margin-left:52px}}
