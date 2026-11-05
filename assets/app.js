@@ -9,30 +9,81 @@ const views = {
   publisher: ["Publisher", "Connect YouTube and manage approved publishing jobs."],
   settings: ["Settings", "Configure your workspace and production preferences."]
 };
+let activeView = "overview";
+
 function toast(message) {
+  const region = $("#toast-region");
+  if (!region) return;
   const node = document.createElement("div");
   node.className = "toast";
   node.textContent = message;
-  $("#toast-region").append(node);
-  setTimeout(() => node.remove(), 3400);
+  region.append(node);
+  window.setTimeout(() => node.remove(), 3400);
 }
+
+function ensurePlaceholder() {
+  let panel = $("#feature-placeholder");
+  if (panel) return panel;
+  panel = document.createElement("section");
+  panel.id = "feature-placeholder";
+  panel.className = "panel feature-placeholder hidden";
+  panel.innerHTML = "<div class='empty-icon'>✳</div><h2></h2><p></p>";
+  $(".page-heading").after(panel);
+  return panel;
+}
+
+function hideAllPagePanels() {
+  [
+    ".welcome-panel", ".section-head", ".stats-grid", ".lower-grid",
+    "#sources-workspace", "#watermark-settings", "#feature-placeholder"
+  ].forEach((selector) => $(selector)?.classList.add("hidden"));
+}
+
 function navigate(view) {
-  const item = views[view] ? view : "overview";
-  navItems.forEach((button) => button.classList.toggle("active", button.dataset.view === item));
-  $("#crumb").textContent = views[item][0];
-  $("#page-title").textContent = views[item][0];
-  $("#page-subtitle").textContent = views[item][1];
-  if (window.innerWidth <= 720) $("#sidebar").classList.remove("open");
+  const next = views[view] ? view : "overview";
+  activeView = next;
+  navItems.forEach((button) => {
+    const selected = button.dataset.view === next;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-current", selected ? "page" : "false");
+  });
+  $("#crumb").textContent = views[next][0];
+  $("#page-title").textContent = views[next][0];
+  $("#page-subtitle").textContent = views[next][1];
+  hideAllPagePanels();
+
+  if (next === "overview") {
+    [".welcome-panel", ".section-head", ".stats-grid", ".lower-grid"].forEach((selector) => $(selector)?.classList.remove("hidden"));
+  } else if (next === "sources" || next === "settings") {
+    document.dispatchEvent(new CustomEvent("shortsflow:view", { detail: { view: next } }));
+  } else {
+    const panel = ensurePlaceholder();
+    panel.querySelector("h2").textContent = views[next][0];
+    panel.querySelector("p").textContent = "This workspace section is being built. Your existing videos and settings are safe.";
+    panel.classList.remove("hidden");
+  }
+
+  const addButton = $("#add-source-btn");
+  if (addButton) addButton.classList.toggle("hidden", !["overview", "sources"].includes(next));
+  if (window.innerWidth <= 720) $("#sidebar")?.classList.remove("open");
 }
 navItems.forEach((button) => button.addEventListener("click", () => navigate(button.dataset.view)));
-$("#mobile-menu").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
-$("#add-source-btn").addEventListener("click", () => $("#source-file").click());
-$("#start-workflow").addEventListener("click", () => $("#source-file").click());
-$("#view-activity").addEventListener("click", () => toast("No activity has been recorded yet."));
+
+$("#mobile-menu")?.addEventListener("click", () => $("#sidebar")?.classList.toggle("open"));
+$("#add-source-btn")?.addEventListener("click", () => {
+  navigate("sources");
+  $("#source-file")?.click();
+});
+$("#start-workflow")?.addEventListener("click", () => {
+  navigate("sources");
+  $("#source-file")?.click();
+});
+$("#view-activity")?.addEventListener("click", () => toast("No activity has been recorded yet."));
+
 let authMode = "login";
 function setAuthMode(mode) {
-  authMode = mode;
-  const registering = mode === "register";
+  authMode = mode === "register" ? "register" : "login";
+  const registering = authMode === "register";
   $("#auth-login-tab").classList.toggle("selected", !registering);
   $("#auth-register-tab").classList.toggle("selected", registering);
   $("#auth-name-field").classList.toggle("hidden", !registering);
@@ -48,9 +99,9 @@ function showAuth(message = "") {
   $("#auth-message").textContent = message;
   $("#auth-message").className = "auth-message";
 }
-$("#auth-login-tab").addEventListener("click", () => setAuthMode("login"));
-$("#auth-register-tab").addEventListener("click", () => setAuthMode("register"));
-$("#auth-form").addEventListener("submit", async (event) => {
+$("#auth-login-tab")?.addEventListener("click", () => setAuthMode("login"));
+$("#auth-register-tab")?.addEventListener("click", () => setAuthMode("register"));
+$("#auth-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = $("#auth-submit");
   const message = $("#auth-message");
@@ -82,6 +133,7 @@ $("#auth-form").addEventListener("submit", async (event) => {
     button.innerHTML = authMode === "register" ? "Create account <span>→</span>" : "Sign in <span>→</span>";
   }
 });
+
 async function checkSession() {
   try {
     const healthResponse = await fetch("/api/health", { headers: { accept: "application/json" } });
@@ -101,7 +153,7 @@ async function checkSession() {
       showAuth();
     }
   } catch {
-    // Do not block the dashboard preview when the API is not configured.
+    // Keep the dashboard preview available if the API is temporarily unreachable.
   }
 }
 async function loadWorkspaceSummary() {
@@ -116,7 +168,7 @@ async function loadWorkspaceSummary() {
     $("#stat-published").textContent = data.stats.published;
     $("#review-count").textContent = data.stats.awaitingReview;
     const activity = $(".empty-activity");
-    if (Array.isArray(data.activity) && data.activity.length) {
+    if (Array.isArray(data.activity) && data.activity.length && activity) {
       activity.innerHTML = "<div class='empty-icon'>◷</div><b>" + data.activity.length + " recent events</b><p>Activity history is available in your workspace.</p>";
     }
   } catch {
@@ -136,17 +188,18 @@ async function checkHealth() {
     label.textContent = "API operational";
     detail.textContent = data.database ? "API and database connected" : "API online · database not connected";
     version.textContent = "API v" + (data.version || "—") + " · " + (data.database ? "Database connected" : "Database pending");
-  } catch (error) {
+  } catch {
     dot.className = "system-dot bad";
     label.textContent = "API unavailable";
     detail.textContent = "Could not reach health endpoint";
     version.textContent = "API status: unavailable";
   }
 }
-$("#refresh-btn").addEventListener("click", () => {
-  checkHealth();
-  loadWorkspaceSummary();
+$("#refresh-btn")?.addEventListener("click", async () => {
+  await Promise.all([checkHealth(), loadWorkspaceSummary()]);
   toast("System status refreshed.");
 });
+
+navigate("overview");
 checkHealth();
 checkSession();
