@@ -40,7 +40,7 @@ Heavy video processing will not run inside request-bound Pages Functions. A sepa
 - Workspace-scoped source-video listing and private streaming preview API with HTTP byte-range support
 - Source preview player in the Sources workspace
 - Persistent, workspace-scoped processing job queue for source-analysis requests, with safe cancellation of queued jobs and manual retry of failed jobs (queue storage only; no worker consumes jobs yet)
-- Versioned source-transcript schema ready to store Whisper output and timestamped segments (transcription runtime not connected yet)
+- Versioned source-transcript storage and a daily AI usage budget table to cap this app's estimated Whisper usage below the free daily allocation (transcription runtime not connected yet)
 - Workspace watermark settings API and 9:16 preview controls
 
 The dashboard does not pretend that upload, AI processing, rendering, or YouTube publishing is active before those services are configured.
@@ -62,7 +62,7 @@ Apply D1 migrations in order from the repository root:
 npx wrangler d1 migrations apply <DATABASE_NAME> --remote
 ```
 
-Wrangler reads the SQL files from `migrations/`. Apply migrations in order: `0001_initial.sql`, `0002_auth.sql`, `0003_workspace_settings.sql`, then `0004_processing_jobs.sql`, and `0005_source_transcripts.sql`. Do not apply `database/schema.sql` as well; it is a reference copy of the original base schema. Bind the private R2 bucket to Pages Functions as `MEDIA`.
+Wrangler reads the SQL files from `migrations/`. Apply migrations in order: `0001_initial.sql`, `0002_auth.sql`, `0003_workspace_settings.sql`, then `0004_processing_jobs.sql`, `0005_source_transcripts.sql`, and `0006_ai_usage_budget.sql`. Do not apply `database/schema.sql` as well; it is a reference copy of the original base schema. Bind the private R2 bucket to Pages Functions as `MEDIA`.
 
 After binding D1 and applying migrations, deploy the Pages project and verify:
 
