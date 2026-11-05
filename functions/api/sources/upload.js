@@ -4,7 +4,7 @@ const MAX_UPLOAD_BYTES = 90 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm", "video/x-matroska", "video/ogg"]);
 
 function safeFilename(value) {
-  const cleaned = String(value || "source-video").replace(/[\\/\\r\\n\\0]/g, "_").replace(/[^a-zA-Z0-9._ -]/g, "").trim();
+  const cleaned = String(value || "source-video").replace(/[\/\r\n\0]/g, "_").replace(/[^a-zA-Z0-9._ -]/g, "").trim();
   return (cleaned || "source-video").slice(0, 120);
 }
 
@@ -23,7 +23,7 @@ export async function onRequestPost({ request, env }) {
   const filename = safeFilename(decodeURIComponent(request.headers.get("X-File-Name") || "source-video"));
   const id = crypto.randomUUID();
   const key = `workspaces/${user.workspace.id}/sources/${id}/${filename}`;
-  const title = filename.replace(/\\.[^.]+$/, "").slice(0, 180) || "Source video";
+  const title = filename.replace(/\.[^.]+$/, "").slice(0, 180) || "Source video";
   const now = new Date().toISOString();
 
   try {
