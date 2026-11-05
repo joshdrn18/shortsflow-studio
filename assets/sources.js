@@ -52,7 +52,7 @@
     for(const word of valid){group.push(word);if(group.length>=7||Number(word.end)-Number(group[0].start)>=3.5){cues.push(group);group=[];}}
     if(group.length)cues.push(group);
     const stamp=value=>{const ms=Math.max(0,Math.round(Number(value)*1000));const h=Math.floor(ms/3600000),m=Math.floor(ms%3600000/60000),s=Math.floor(ms%60000/1000),r=ms%1000;return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0")+"."+String(r).padStart(3,"0");};
-    return ["WEBVTT","",...cues.map((cue,i)=>(i+1)+"\\n"+stamp(cue[0].start)+" --> "+stamp(cue[cue.length-1].end)+"\\n"+cue.map(w=>w.word).join(" ").trim()),""].join("\\n");
+    return ["WEBVTT","",...cues.map((cue,i)=>(i+1)+"\n"+stamp(cue[0].start)+" --> "+stamp(cue[cue.length-1].end)+"\n"+cue.map(w=>w.word).join(" ").trim()),""].join("\n");
   }
   let activeTranscriptVtt="";
   async function openTranscript(sourceId,title) {
