@@ -6,11 +6,18 @@ export async function onRequestGet({request,env,params}){
  const user=await getSessionUser(request,env);if(!user?.workspace?.id)return json({ok:false,error:"Authentication required."},401);
  const id=String(params?.clipId||"");if(!ID.test(id))return json({ok:false,error:"Invalid clip ID."},400);
  try{
-  const row=await env.DB.prepare(`SELECT a.storage_key,a.mime_type,a.version,a.metadata_version,m.version AS current_version FROM clip_assets a JOIN clips c ON c.id=a.clip_id LEFT JOIN clip_metadata m ON m.clip_id=c.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=c.id) WHERE a.clip_id=? AND c.workspace_id=? AND a.asset_type='render' ORDER BY a.version DESC LIMIT 1`).bind(id,user.workspace.id).first();
-  if(!row)return json({ok:false,error:"No rendered video exists for this clip yet."},404);
-  if(Number(row.metadata_version)!==Number(row.current_version))return json({ok:false,error:"This render belongs to an older edit. Render the latest version again."},409);
+  const url=new URL(request.url), assetId=url.searchParams.get("assetId");
+  if(assetId && !ID.test(assetId))return json({ok:false,error:"Invalid render asset ID."},400);
+  const sql=assetId
+    ? `SELECT a.storage_key,a.mime_type,a.version,a.metadata_version,m.version AS current_version FROM clip_assets a JOIN clips c ON c.id=a.clip_id LEFT JOIN clip_metadata m ON m.clip_id=c.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=c.id) WHERE a.clip_id=? AND c.workspace_id=? AND a.asset_type='render' AND a.id=? LIMIT 1`
+    : `SELECT a.storage_key,a.mime_type,a.version,a.metadata_version,m.version AS current_version FROM clip_assets a JOIN clips c ON c.id=a.clip_id LEFT JOIN clip_metadata m ON m.clip_id=c.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=c.id) WHERE a.clip_id=? AND c.workspace_id=? AND a.asset_type='render' ORDER BY a.version DESC LIMIT 1`;
+  const row=assetId
+    ? await env.DB.prepare(sql).bind(id,user.workspace.id,assetId).first()
+    : await env.DB.prepare(sql).bind(id,user.workspace.id).first();
+  if(!row)return json({ok:false,error:"Rendered video was not found in this workspace."},404);
+  if(!assetId && Number(row.metadata_version)!==Number(row.current_version))return json({ok:false,error:"This render belongs to an older edit. Render the latest version again."},409);
   const head=await env.MEDIA.head(row.storage_key);if(!head)return json({ok:false,error:"Rendered video is missing."},404);
-  const h=new Headers({"Content-Type":row.mime_type||"video/webm","Content-Disposition":'inline; filename="shortsflow-render.webm"',"Accept-Ranges":"bytes","Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"});
+  const h=new Headers({"Content-Type":row.mime_type||"video/webm","Content-Disposition":url.searchParams.get("download")==="1"?'attachment; filename="shortsflow-render-v'+Number(row.version)+'.webm"':'inline; filename="shortsflow-render-v'+Number(row.version)+'.webm"',"Accept-Ranges":"bytes","Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"});
   const r=rangeOf(request.headers.get("Range"),head.size);if(r?.invalid){h.set("Content-Range",`bytes */${head.size}`);return new Response(null,{status:416,headers:h});}
   const obj=r?await env.MEDIA.get(row.storage_key,{range:{offset:r.start,length:r.length}}):await env.MEDIA.get(row.storage_key);if(!obj)return json({ok:false,error:"Rendered video is missing."},404);
   if(r){h.set("Content-Range",`bytes ${r.start}-${r.end}/${head.size}`);h.set("Content-Length",String(r.length));return new Response(obj.body,{status:206,headers:h});}
