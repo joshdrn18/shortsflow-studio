@@ -11,7 +11,7 @@
     const panel=document.createElement("section"); panel.id="subtitle-studio"; panel.className="subtitle-studio";
     panel.innerHTML='<div class="subtitle-studio-head"><div><span class="discovery-kicker">SUBTITLE STUDIO</span><strong>Style your words</strong><small id="subtitle-status">Loading timestamped words…</small></div><label class="subtitle-enable"><input id="subtitle-enabled" type="checkbox" checked> Show subtitles</label></div><div class="subtitle-controls"><label>Style<select id="subtitle-preset"><option value="pop">Pop highlight</option><option value="classic">Classic bold</option><option value="minimal">Minimal</option></select></label><label>Position<select id="subtitle-position"><option value="bottom">Bottom</option><option value="top">Top</option></select></label><label>Font size <span id="subtitle-size-value">28px</span><input id="subtitle-size" type="range" min="18" max="44" value="28"></label><label>Text color<select id="subtitle-color"><option value="#ffffff">White</option><option value="#f8e16c">Warm yellow</option><option value="#b9f5d0">Mint</option><option value="#ffb4c2">Soft pink</option></select></label><label>Highlight<select id="subtitle-highlight"><option value="#b59aff">Lavender</option><option value="#f8e16c">Yellow</option><option value="#75c8ff">Blue</option><option value="#ff8fbd">Pink</option></select></label><label class="subtitle-background"><input id="subtitle-background" type="checkbox" checked> Text backing</label></div><div class="subtitle-studio-footer"><span>Preview uses transcript word timestamps · relative to this clip</span><button type="button" class="primary-button" id="subtitle-save">Save subtitle style</button></div>';
     frame.after(panel);
-    ["subtitle-enabled","subtitle-preset","subtitle-position","subtitle-size","subtitle-color","subtitle-highlight","subtitle-background"].forEach(id=>$("#"+id).addEventListener("input",update));
+    ["subtitle-enabled","subtitle-preset","subtitle-position","subtitle-size","subtitle-color","subtitle-highlight","subtitle-background"].forEach(id=>$("#"+id).addEventListener("input",()=>{window.__shortsflowSubtitleDirty=true;update();}));
     $("#subtitle-save").addEventListener("click",save);
     video.addEventListener("timeupdate",render);
     video.addEventListener("seeked",render);
@@ -21,7 +21,7 @@
   }
   function update(){readControls();$("#subtitle-size-value").textContent=config.fontSize+"px";render();}
   function applyConfig(value){
-    config={...defaults,...(value||{})};
+    config={...defaults,...(value||{})};window.__shortsflowSubtitleDirty=false;
     $("#subtitle-enabled").checked=config.enabled;$("#subtitle-preset").value=config.preset;$("#subtitle-position").value=config.position;
     $("#subtitle-size").value=config.fontSize;$("#subtitle-color").value=config.color;$("#subtitle-highlight").value=config.highlight;$("#subtitle-background").checked=config.background;
     update();
@@ -55,7 +55,7 @@
     try{
       const r=await fetch("/api/clips/"+encodeURIComponent(clipId)+"/subtitles",{method:"PUT",headers:{"content-type":"application/json","accept":"application/json"},body:JSON.stringify({config})});
       const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"Could not save subtitle style.");
-      $("#subtitle-status").textContent="Saved as metadata version "+d.metadataVersion+". Preview only — no video has been rendered.";
+      window.__shortsflowSubtitleDirty=false;$("#subtitle-status").textContent="Saved as metadata version "+d.metadataVersion+". Preview only — no video has been rendered.";
     }catch(e){$("#subtitle-status").textContent=e.message;}
     finally{busy=false;b.disabled=false;b.textContent="Save subtitle style";}
   }
