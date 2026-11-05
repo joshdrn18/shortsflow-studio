@@ -346,7 +346,6 @@ async function processClipDiscovery(env, job) {
     const metadataId = crypto.randomUUID();
     const now = new Date().toISOString();
     accepted.push({ start, end, score: item.score });
-    accepted.push;
     await env.DB.batch([
       env.DB.prepare(
         `INSERT OR IGNORE INTO clips
