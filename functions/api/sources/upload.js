@@ -20,7 +20,9 @@ export async function onRequestPost({ request, env }) {
   if (!Number.isSafeInteger(size) || size < 1) return json({ ok: false, error: "Could not determine the video file size." }, 400);
   if (size > MAX_UPLOAD_BYTES) return json({ ok: false, error: "This upload endpoint currently supports files up to 90 MB." }, 413);
 
-  const filename = safeFilename(decodeURIComponent(request.headers.get("X-File-Name") || "source-video"));
+  let decodedFilename = request.headers.get("X-File-Name") || "source-video";
+  try { decodedFilename = decodeURIComponent(decodedFilename); } catch { return json({ ok: false, error: "Invalid filename encoding." }, 400); }
+  const filename = safeFilename(decodedFilename);
   const id = crypto.randomUUID();
   const key = `workspaces/${user.workspace.id}/sources/${id}/${filename}`;
   const title = filename.replace(/\.[^.]+$/, "").slice(0, 180) || "Source video";
