@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0c10">
+  <meta name="description" content="ShortsFlow Studio — AI-assisted short-form video production and publishing workspace.">
+  <title>ShortsFlow Studio</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#" aria-label="ShortsFlow Studio home">
+        <span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.8 20 11.2a.9.9 0 0 1 0 1.6L7 20.2a.9.9 0 0 1-1.35-.78V4.58A.9.9 0 0 1 7 3.8Z" fill="currentColor"/><path d="M4 3v18" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".55"/></svg></span>
+        <span class="brand-copy"><strong>shortsflow</strong><small>STUDIO</small></span>
+      </a>
+      <div class="workspace-label">WORKSPACE</div>
+      <nav class="nav-list" aria-label="Main navigation">
+        <button class="nav-item active" data-view="overview"><span class="nav-icon">⌂</span>Overview</button>
+        <button class="nav-item" data-view="sources"><span class="nav-icon">▤</span>Sources</button>
+        <button class="nav-item" data-view="clips"><span class="nav-icon">▧</span>Clip discovery</button>
+        <button class="nav-item" data-view="review"><span class="nav-icon">◉</span>Review center <span class="nav-count" id="review-count">0</span></button>
+        <button class="nav-item" data-view="library"><span class="nav-icon">▦</span>Content library</button>
+        <button class="nav-item" data-view="publisher"><span class="nav-icon">↗</span>Publisher</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="system-card">
+          <span class="system-dot" id="system-dot"></span>
+          <div><strong id="system-label">Checking system</strong><small id="system-detail">Connecting to API…</small></div>
+        </div>
+        <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span>Settings</button>
+        <div class="profile-row"><div class="avatar">S</div><div><strong>Studio workspace</strong><small>Personal workspace</small></div><span class="profile-menu">•••</span></div>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobile-menu" aria-label="Open navigation">☰</button>
+        <div class="breadcrumb"><span>Workspace</span><b>/</b><strong id="crumb">Overview</strong></div>
+        <div class="top-actions"><span class="live-status"><i></i> Workspace ready</span><button class="icon-button" id="refresh-btn" title="Refresh status" aria-label="Refresh status">↻</button><div class="top-avatar">S</div></div>
+      </header>
+
+      <section class="page-content">
+        <div class="page-heading">
+          <div><div class="eyebrow">YOUR CONTENT WORKSPACE</div><h1 id="page-title">Overview</h1><p id="page-subtitle">Your short-form production pipeline, all in one place.</p></div>
+          <button class="primary-button" id="add-source-btn"><span>＋</span> Add source video</button>
+        </div>
+
+        <section class="welcome-panel">
+          <div class="welcome-copy"><div class="welcome-tag"><span class="sparkle">✳</span> AI CONTENT WORKFLOW</div><h2>From long-form to<br><em>short-form, seamlessly.</em></h2><p>Turn your source videos into polished Shorts. Review every clip before anything gets published.</p><button class="welcome-button" id="start-workflow">Start a workflow <span>→</span></button></div>
+          <div class="welcome-art" aria-hidden="true"><div class="art-orbit orbit-one"></div><div class="art-orbit orbit-two"></div><div class="art-play"><span>▶</span></div><div class="art-chip chip-top">AI CLIPPING <b>✳</b></div><div class="art-chip chip-bottom"><b>CC</b> SMART SUBTITLES</div><div class="art-wave"></div></div>
+        </section>
+
+        <div class="section-head"><div><h3>Production overview</h3><p>A live snapshot of your workspace.</p></div><span class="period-label">ALL TIME</span></div>
+        <div class="stats-grid">
+          <article class="stat-card"><div class="stat-top"><span>Source videos</span><span class="stat-icon purple">▤</span></div><strong id="stat-sources">0</strong><small>Videos added to workspace</small></article>
+          <article class="stat-card"><div class="stat-top"><span>Clips discovered</span><span class="stat-icon blue">▧</span></div><strong id="stat-clips">0</strong><small>AI-selected moments</small></article>
+          <article class="stat-card"><div class="stat-top"><span>Awaiting review</span><span class="stat-icon amber">◉</span></div><strong id="stat-review">0</strong><small>Require your approval</small></article>
+          <article class="stat-card"><div class="stat-top"><span>Published Shorts</span><span class="stat-icon green">↗</span></div><strong id="stat-published">0</strong><small>Successfully uploaded</small></article>
+        </div>
+
+        <div class="lower-grid">
+          <section class="panel pipeline-panel"><div class="panel-heading"><div><h3>Production pipeline</h3><p>Every video moves through these stages.</p></div><span class="subtle-pill">REVIEW REQUIRED</span></div>
+            <div class="pipeline-steps">
+              <div class="pipeline-step"><span class="step-number">01</span><div><b>Source intake</b><small>Upload or add a video URL</small></div><span class="step-state">Ready</span></div>
+              <div class="pipeline-step"><span class="step-number">02</span><div><b>AI clip discovery</b><small>Find engaging moments and hooks</small></div><span class="step-state">Queued</span></div>
+              <div class="pipeline-step"><span class="step-number">03</span><div><b>Edit & enrich</b><small>Vertical crop, subtitles and metadata</small></div><span class="step-state">Queued</span></div>
+              <div class="pipeline-step"><span class="step-number">04</span><div><b>Render & quality check</b><small>Validate the final video output</small></div><span class="step-state">Queued</span></div>
+              <div class="pipeline-step"><span class="step-number">05</span><div><b>Your approval</b><small>Nothing publishes without approval</small></div><span class="step-state approval">Required</span></div>
+              <div class="pipeline-step"><span class="step-number">06</span><div><b>YouTube publishing</b><small>Upload approved clips only</small></div><span class="step-state">Locked</span></div>
+            </div>
+          </section>
+          <section class="panel activity-panel"><div class="panel-heading"><div><h3>Recent activity</h3><p>Latest workspace events.</p></div><button class="text-button" id="view-activity">View all</button></div><div class="empty-activity"><div class="empty-icon">◷</div><b>No activity yet</b><p>Your production events will appear here when you add your first source video.</p></div></section>
+        </div>
+        <footer class="footer"><span>SHORTSFLOW STUDIO <b>·</b> PRIVATE WORKSPACE</span><span id="api-version">API status: checking</span></footer>
+      </section>
+    </main>
+  </div>
+  <input type="file" id="source-file" accept="video/*" hidden>
+  <div class="toast-region" id="toast-region" aria-live="polite"></div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
