@@ -139,6 +139,7 @@ async function processNextJob(env) {
       throw new Error("Source exceeds the Media Transformations 100 MB input limit.");
     }
 
+    payload.durationSeconds = duration;
     const transcript = await ensureTranscript(env, job, payload);
     transcriptId = transcript.id;
     const chunkIndex = Math.max(0, Number(payload.chunkIndex || 0));
@@ -226,7 +227,7 @@ async function completeTranscript(env, job, payload, transcriptId) {
   await env.DB.batch([
     env.DB.prepare(
       "UPDATE source_transcripts SET status = 'completed', audio_duration_seconds = COALESCE(?, audio_duration_seconds), error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
-    ).bind(now, transcriptId, job.workspace_id),
+    ).bind(Number(payload.durationSeconds || 0) || null, now, transcriptId, job.workspace_id),
     env.DB.prepare(
       "UPDATE source_videos SET status = 'ready', error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
     ).bind(now, job.source_video_id, job.workspace_id),
