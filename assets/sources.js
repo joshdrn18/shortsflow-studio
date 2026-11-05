@@ -54,7 +54,11 @@
     ensurePanel();
     const input=$("#source-file"); loadJobs();
     input.addEventListener("change",e=>{const f=e.target.files&&e.target.files[0];if(f)upload(f);e.target.value="";});
-    document.querySelectorAll('[data-view="sources"]').forEach(b=>b.addEventListener("click",()=>{ensurePanel();$("#sources-workspace").classList.remove("hidden");$(".welcome-panel").classList.add("hidden");$(".section-head").classList.add("hidden");$(".stats-grid").classList.add("hidden");$(".lower-grid").classList.add("hidden");load();}));
-    ["#add-source-btn","#start-workflow"].forEach(sel=>$(sel)?.addEventListener("click",()=>{ensurePanel();$("#sources-workspace").classList.remove("hidden");$(".welcome-panel").classList.add("hidden");$(".section-head").classList.add("hidden");$(".stats-grid").classList.add("hidden");$(".lower-grid").classList.add("hidden");load();}));
+    document.addEventListener("shortsflow:view", event => {
+      if (event.detail?.view !== "sources") return;
+      ensurePanel();
+      $("#sources-workspace").classList.remove("hidden");
+      load();
+    });
   });
 })();
