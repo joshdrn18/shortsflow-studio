@@ -47,7 +47,7 @@
     const promise=video.play();if(promise?.catch)promise.catch(()=>{$("#clip-preview-message").textContent="Press play on the video to start preview.";});
   }
   function closePreview(){
-    const dialog=$("#clip-preview-dialog"),video=$("#clip-preview-video");video.pause();video.removeAttribute("src");video.load();activeClip=null;
+    const dialog=$("#clip-preview-dialog"),video=$("#clip-preview-video");video.pause();video.removeAttribute("src");video.load();activeClip=null;window.__shortsflowActiveClip=null;
     if(dialog?.close)dialog.close();else dialog?.removeAttribute("open");
   }
   function openClipPreview(clip){
