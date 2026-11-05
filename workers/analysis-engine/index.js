@@ -404,6 +404,7 @@ async function processClipDiscovery(env, job) {
     if (to >= duration) break;
   }
   const candidates = [];
+  const windowDiagnostics = [];
   for (const window of windows) {
     const timeline = window.words.map(w => "[" + Number(w.start).toFixed(2) + "-" + Number(w.end).toFixed(2) + "] " + String(w.word || "")).join(" ");
     const prompt = "Find 1 to 3 of the strongest distinct short-form clips inside this transcript window. Each must be 15–60 seconds, start with a compelling hook, make sense on its own, and end on a complete thought, joke, reveal, or payoff. Prefer meaningful moments; avoid greetings, filler, repeated lines and incomplete sentences. Use ONLY the supplied absolute word timestamps. Return fewer only if this window truly has fewer viable moments. Rank strongest first. Return compact JSON only: {\"candidates\":[{\"startSeconds\":12.3,\"endSeconds\":42.8,\"title\":\"Specific engaging title\",\"hook\":\"Opening line\",\"reason\":\"Why this moment works\",\"caption\":\"Short caption\",\"hashtags\":[\"#shorts\",\"#topic\"],\"score\":91}]}. Full source duration: " + duration.toFixed(2) + " seconds. Search window: " + window.from.toFixed(2) + "–" + window.to.toFixed(2) + " seconds. Transcript language: " + (transcript.language || "auto-detected") + ". Timestamped transcript: " + timeline;
@@ -426,6 +427,8 @@ async function processClipDiscovery(env, job) {
         parsed = parseClipSelectorResponse(result);
       }
     }
+    const parsedCount = Array.isArray(parsed) ? parsed.length : 0;
+    windowDiagnostics.push({ from: window.from, to: window.to, words: window.words.length, candidates: parsedCount });
     if (Array.isArray(parsed)) candidates.push(...parsed.map(candidate => ({ ...candidate, __windowStart: window.from, __windowEnd: window.to })));
   }
   if (!candidates.length) {
@@ -437,6 +440,7 @@ async function processClipDiscovery(env, job) {
   ).bind(job.id).all();
   const existing = (existingResult.results || []).map(row => ({ start: Number(row.start_seconds), end: Number(row.end_seconds) }));
   const accepted = [];
+  const rejected = { invalidTime: 0, boundary: 0, duration: 0, overlap: 0, missingHook: 0, missingExcerpt: 0 };
   const nearest = (value, field) => words.reduce((best, word) => {
     const current = Number(word[field]);
     return Math.abs(current - value) < Math.abs(Number(best[field]) - value) ? word : best;
@@ -452,7 +456,7 @@ async function processClipDiscovery(env, job) {
     const candidate = item.candidate;
     let rawStart = Number(candidate.startSeconds ?? candidate.start_seconds);
     let rawEnd = Number(candidate.endSeconds ?? candidate.end_seconds);
-    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) continue;
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) { rejected.invalidTime++; continue; }
     const windowStart = Number(candidate.__windowStart || 0);
     const windowEnd = Number(candidate.__windowEnd || duration);
     // Some model responses return timestamps relative to their supplied window.
@@ -466,19 +470,19 @@ async function processClipDiscovery(env, job) {
     const start = Number(startWord.start);
     const end = Number(endWord.end);
     const clipDuration = end - start;
-    if (Math.abs(start - rawStart) > 3 || Math.abs(end - rawEnd) > 3) continue;
-    if (start < 0 || end > duration || clipDuration < 15 || clipDuration > 60) continue;
+    if (Math.abs(start - rawStart) > 3 || Math.abs(end - rawEnd) > 3) { rejected.boundary++; continue; }
+    if (start < 0 || end > duration || clipDuration < 15 || clipDuration > 60) { rejected.duration++; continue; }
     const overlaps = [...existing, ...accepted].some(other => {
       const overlap = Math.max(0, Math.min(end, other.end) - Math.max(start, other.start));
       return overlap / Math.min(clipDuration, other.end - other.start) > 0.3;
     });
-    if (overlaps) continue;
+    if (overlaps) { rejected.overlap++; continue; }
 
     const title = String(candidate.title || candidate.hook || "Untitled clip").trim().slice(0, 120);
     const hook = String(candidate.hook || candidate.title || "").trim().slice(0, 220);
-    if (!hook) continue;
+    if (!hook) { rejected.missingHook++; continue; }
     const excerpt = words.filter(word => Number(word.start) >= start && Number(word.end) <= end).map(word => String(word.word || "")).join(" ").trim();
-    if (!excerpt) continue;
+    if (!excerpt) { rejected.missingExcerpt++; continue; }
     const hashtags = Array.isArray(candidate.hashtags) ? candidate.hashtags.map(tag => String(tag).trim()).filter(Boolean).slice(0, 12).join(" ") : String(candidate.hashtags || "").slice(0, 500);
     const caption = String(candidate.caption || candidate.reason || "").trim().slice(0, 2000);
     const clipId = crypto.randomUUID();
@@ -507,10 +511,10 @@ async function processClipDiscovery(env, job) {
   await env.DB.batch([
     env.DB.prepare(
       "UPDATE processing_jobs SET status = 'succeeded', result_json = ?, completed_at = ?, updated_at = ?, locked_until = NULL, locked_by = NULL, last_error = NULL WHERE id = ?"
-    ).bind(JSON.stringify({ transcriptId, candidates: count, model: CLIP_MODEL }), now, now, job.id),
+    ).bind(JSON.stringify({ transcriptId, candidates: count, model: CLIP_MODEL, returned: candidates.length, windows: windowDiagnostics, rejected }), now, now, job.id),
     env.DB.prepare(
       "INSERT INTO activity_logs (id, workspace_id, entity_type, entity_id, event, details, created_at) VALUES (?, ?, 'source_video', ?, 'source.clips_discovered', ?, ?)"
-    ).bind(crypto.randomUUID(), job.workspace_id, job.source_video_id, JSON.stringify({ jobId: job.id, candidates: count, model: CLIP_MODEL }), now)
+    ).bind(crypto.randomUUID(), job.workspace_id, job.source_video_id, JSON.stringify({ jobId: job.id, candidates: count, model: CLIP_MODEL, returned: candidates.length, windows: windowDiagnostics, rejected }), now)
   ]);
 }
 
