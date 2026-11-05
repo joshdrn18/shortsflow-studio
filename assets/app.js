@@ -35,6 +35,25 @@ $("#source-file").addEventListener("change", (event) => {
   event.target.value = "";
 });
 $("#view-activity").addEventListener("click", () => toast("No activity has been recorded yet."));
+async function loadWorkspaceSummary() {
+  try {
+    const response = await fetch("/api/workspace/summary", { headers: { accept: "application/json" } });
+    if (!response.ok) return;
+    const data = await response.json();
+    if (!data.ok || !data.stats) return;
+    $("#stat-sources").textContent = data.stats.sources;
+    $("#stat-clips").textContent = data.stats.clips;
+    $("#stat-review").textContent = data.stats.awaitingReview;
+    $("#stat-published").textContent = data.stats.published;
+    $("#review-count").textContent = data.stats.awaitingReview;
+    const activity = $(".empty-activity");
+    if (Array.isArray(data.activity) && data.activity.length) {
+      activity.innerHTML = "<div class='empty-icon'>◷</div><b>" + data.activity.length + " recent events</b><p>Activity history is available in your workspace.</p>";
+    }
+  } catch {
+    // Keep the empty state when the account or API is not ready.
+  }
+}
 async function checkHealth() {
   const dot = $("#system-dot");
   const label = $("#system-label");
@@ -55,5 +74,6 @@ async function checkHealth() {
     version.textContent = "API status: unavailable";
   }
 }
-$("#refresh-btn").addEventListener("click", () => { checkHealth(); toast("System status refreshed."); });
+$("#refresh-btn").addEventListener("click", () => { checkHealth();
+loadWorkspaceSummary(); loadWorkspaceSummary(); toast("System status refreshed."); });
 checkHealth();
