@@ -86,7 +86,8 @@
   }
   document.addEventListener("DOMContentLoaded",()=>{
     ensurePanel();
-    const input=$("#source-file"); loadJobs();\n    setInterval(()=>{const panel=$("#sources-workspace");if(panel&&!panel.classList.contains("hidden"))loadJobs();},15000);
+    const input=$("#source-file"); loadJobs();
+    setInterval(()=>{const panel=$("#sources-workspace");if(panel&&!panel.classList.contains("hidden"))loadJobs();},15000);
     $("#source-preview-close").addEventListener("click",()=>{const dialog=$("#source-preview-dialog");$("#source-preview-video").pause();$("#source-preview-video").removeAttribute("src");$("#source-preview-video").load();if(dialog.close)dialog.close();else dialog.removeAttribute("open");});
     $("#source-preview-dialog").addEventListener("click",event=>{if(event.target.id==="source-preview-dialog")$("#source-preview-close").click();});
     input.addEventListener("change",e=>{const f=e.target.files&&e.target.files[0];if(f)upload(f);e.target.value="";});
