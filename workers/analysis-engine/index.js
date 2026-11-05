@@ -190,7 +190,8 @@ async function processNextJob(env) {
     const current = await env.DB.prepare(
       "SELECT transcript_text, segments_json FROM source_transcripts WHERE id = ? AND workspace_id = ?"
     ).bind(transcriptId, job.workspace_id).first();
-    const priorText = String(current?.transcript_text || "");\n    const language = String(result?.transcription_info?.language || result?.language || "") || null;
+    const priorText = String(current?.transcript_text || "");
+    const language = String(result?.transcription_info?.language || result?.language || "") || null;
     const nextText = [priorText, String(result?.text || "").trim()].filter(Boolean).join(" ").slice(0, 250000);
     let priorWords = [];
     try { priorWords = JSON.parse(current?.segments_json || "[]"); } catch { priorWords = []; }
