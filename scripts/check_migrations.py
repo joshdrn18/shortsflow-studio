@@ -43,6 +43,16 @@ missing = required - tables
 if missing:
     raise SystemExit(f"Missing tables after migrations: {sorted(missing)}")
 
+clip_columns = {row[1] for row in connection.execute("PRAGMA table_info(clips)")}
+if "discovery_job_id" not in clip_columns:
+    raise SystemExit("clips.discovery_job_id is missing")
+
+clip_indexes = {
+    row[1] for row in connection.execute("PRAGMA index_list(clips)")
+}
+if "idx_clips_discovery_job_time" not in clip_indexes:
+    raise SystemExit("Clip discovery idempotency index is missing")
+
 connection.execute(
     "INSERT INTO users (id, email, display_name, password_hash) VALUES (?, ?, ?, ?)",
     ("user-test", "creator@example.com", "Creator", "test-hash"),
