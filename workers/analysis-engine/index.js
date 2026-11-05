@@ -87,6 +87,21 @@ async function reserveAiBudget(env, seconds) {
   return Number(result.meta?.changes || 0) > 0;
 }
 
+async function reserveTextBudget(env, inputTokens, outputTokens) {
+  const usageDate = new Date().toISOString().slice(0, 10);
+  const neurons = (Math.max(0, inputTokens) * 4119 + Math.max(0, outputTokens) * 34868) / 1000000 + 20;
+  const now = new Date().toISOString();
+  const result = await env.DB.prepare(
+    `INSERT INTO ai_usage_daily (usage_date, neurons_reserved, audio_seconds_reserved, updated_at)
+     VALUES (?, ?, 0, ?)
+     ON CONFLICT(usage_date) DO UPDATE SET
+       neurons_reserved = neurons_reserved + excluded.neurons_reserved,
+       updated_at = excluded.updated_at
+     WHERE neurons_reserved + excluded.neurons_reserved <= ?`
+  ).bind(usageDate, neurons, now, DAILY_NEURON_BUDGET).run();
+  return Number(result.meta?.changes || 0) > 0;
+}
+
 async function ensureTranscript(env, job, payload) {
   if (payload.transcriptId) {
     const existing = await env.DB.prepare(
