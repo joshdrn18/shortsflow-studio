@@ -184,3 +184,5 @@
 
 /* Processing queue cancel visibility */
 .job-cancel-button{display:inline-flex!important;align-items:center;justify-content:center;min-width:88px;padding:8px 12px!important;border:1px solid #8b3e49!important;border-radius:7px!important;background:#351b23!important;color:#ffb1b8!important;font-size:10px!important;font-weight:800!important;white-space:nowrap}.job-cancel-button:hover{background:#51232e!important;border-color:#d15a69!important}.job-running-note{font-size:9px;color:#a9a4b5;white-space:normal}
+
+.clip-preview-timeline{display:grid;grid-template-columns:48px minmax(0,1fr) 48px;align-items:center;gap:10px;margin:9px 2px 2px;color:#b9bfd0;font:600 10px 'DM Sans',sans-serif;font-variant-numeric:tabular-nums}.clip-preview-timeline input{width:100%;accent-color:#a78bfa;cursor:pointer}.clip-preview-dialog video{max-height:52vh}
