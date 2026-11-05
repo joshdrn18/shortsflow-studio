@@ -391,7 +391,9 @@ async function processClipDiscovery(env, job) {
   }
 
   const duration = Number(transcript.audio_duration_seconds || 0);
-  const system = "You are an expert short-form video editor. Identify self-contained, high-retention moments from timestamped speech. Never invent speech or timestamps. Return valid JSON only.";
+  const source = await env.DB.prepare("SELECT title FROM source_videos WHERE id = ? AND workspace_id = ?").bind(job.source_video_id, job.workspace_id).first();
+  const sourceTitle = String(source?.title || "");
+  const system = "You are an expert short-form video editor and social copywriter. Identify self-contained, high-retention moments from timestamped speech. Never invent speech, events, character actions, or timestamps. Metadata quality is mandatory: titles must be specific, descriptive, natural, and normally 4–10 words; never use a one-word reaction such as Wow, Whoa, Yes, or Okay as a title. Captions must be a complete, engaging 1–2 sentence description of the actual moment, not a repeat of the title or a transcript fragment. Hashtags must be 3–6 relevant topical tags grounded in the source and transcript; never output #topic or generic filler. Return valid JSON only.";
   // Split long transcripts into overlapping windows so one model response cannot crowd out
   // every candidate. Each window independently searches for 1–3 distinct moments.
   const WINDOW_SECONDS = 150;
@@ -504,10 +506,21 @@ async function processClipDiscovery(env, job) {
     const excerpt = words.filter(word => Number(word.start) >= start && Number(word.end) <= end).map(word => String(word.word || "")).join(" ").trim();
     if (!excerpt) { rejected.missingExcerpt++; continue; }
     const proposedTitle = String(candidate.title || "").trim();
-    const genericTitle = /^(yes|yeah|yep|no|okay|ok|wow|oh|hey|look|wait|what|huh|hello|hi)[.!?\s]*$/i.test(proposedTitle);
+    const genericTitle = /^(yes|yeah|yep|no|okay|ok|wow|whoa|oh|hey|look|wait|what|huh|hello|hi)[.!?\s]*$/i.test(proposedTitle);
     const title = String(genericTitle ? (candidate.reason || excerpt.split(/[.!?]/)[0] || candidate.hook) : (proposedTitle || candidate.reason || excerpt.split(/[.!?]/)[0] || "Untitled clip")).trim().slice(0, 120);
-    const hashtags = Array.isArray(candidate.hashtags) ? candidate.hashtags.map(tag => String(tag).trim()).filter(Boolean).slice(0, 12).join(" ") : String(candidate.hashtags || "").slice(0, 500);
-    const caption = String(candidate.caption || candidate.reason || "").trim().slice(0, 2000);
+    let hashtagList = Array.isArray(candidate.hashtags) ? candidate.hashtags : String(candidate.hashtags || "").split(/\s+/);
+    hashtagList = hashtagList.map(tag => String(tag).trim().replace(/^#?/, "#").replace(/[^#\p{L}\p{N}_]/gu, "")).filter(tag => tag.length > 1 && !/^#(topic|viral|fyp)$/i.test(tag));
+    if (hashtagList.length < 3) {
+      const sourceTags = sourceTitle.toLowerCase().match(/[a-z0-9]+/g) || [];
+      const derived = sourceTags.filter(word => word.length > 3 && !["more","back","school","minutes","missions"].includes(word)).slice(0, 4).map(word => "#" + word);
+      hashtagList = [...new Set([...hashtagList, ...derived, "#shorts"])];
+    }
+    const hashtags = [...new Set(hashtagList)].slice(0, 6).join(" ");
+    let caption = String(candidate.caption || "").trim();
+    const genericCaption = !caption || caption.length < 35 || caption.toLowerCase() === title.toLowerCase() || /^(whoa|wow|yes|yeah|okay|ok|oh)[.!?\s]*$/i.test(caption);
+    if (genericCaption) caption = String(candidate.reason || hook || excerpt).trim();
+    if (caption.length < 35) caption = "A memorable moment from " + (sourceTitle || "this video") + ": " + caption;
+    caption = caption.slice(0, 2000);
     const clipId = crypto.randomUUID();
     const metadataId = crypto.randomUUID();
     const now = new Date().toISOString();
