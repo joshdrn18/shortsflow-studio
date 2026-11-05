@@ -72,7 +72,7 @@
       button.textContent=d.reused?"Already queued":"Queued"; await loadJobs();
     } catch(e){button.disabled=false;button.textContent="Queue analysis";alert(e.message);}
   }
-  function upload(file) {
+  async function upload(file) {
     if(!allowed.has(file.type)){alert("Unsupported format. Use MP4, MOV, WebM, MKV or OGG.");return;}
     if(file.size>90*1024*1024){alert("This upload currently supports files up to 90 MB.");return;}
     const box=$("#upload-progress"),bar=$("#upload-progress-bar"),pct=$("#upload-percent"),status=$("#upload-status");
