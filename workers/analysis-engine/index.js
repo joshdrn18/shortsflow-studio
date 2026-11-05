@@ -1,4 +1,5 @@
 const MODEL = "@cf/openai/whisper";
+const CLIP_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
 const CHUNK_SECONDS = 60;
 const MAX_SOURCE_SECONDS = 600;
 const DAILY_NEURON_BUDGET = 8000;
@@ -29,7 +30,7 @@ async function claimJob(env) {
        SET status = 'running', locked_by = ?, locked_until = ?, updated_at = ?
      WHERE id = (
        SELECT id FROM processing_jobs
-       WHERE job_type = 'analyze_source'
+       WHERE job_type IN ('analyze_source','discover_clips')
          AND status IN ('queued','running')
          AND available_at <= ?
          AND (locked_until IS NULL OR locked_until < ?)
