@@ -40,7 +40,7 @@ export async function onRequestPost({ request, env }) {
     ).bind(user.workspace.id, source.id, body.jobType).first();
     if (active) return json({ ok: true, job: { id: active.id, status: active.status }, reused: true });
     const id = crypto.randomUUID();
-    const key = "analyze_source:" + user.workspace.id + ":" + source.id + ":v1";
+    const key = "analyze_source:" + user.workspace.id + ":" + source.id + ":v1:" + id;
     const now = new Date().toISOString();
     await env.DB.prepare(
       `INSERT INTO processing_jobs
