@@ -23,6 +23,8 @@ export async function onRequestPost({ request, env }) {
   let decodedFilename = request.headers.get("X-File-Name") || "source-video";
   try { decodedFilename = decodeURIComponent(decodedFilename); } catch { return json({ ok: false, error: "Invalid filename encoding." }, 400); }
   const filename = safeFilename(decodedFilename);
+  const rawDuration = Number(request.headers.get("X-Video-Duration") || 0);
+  const durationSeconds = Number.isFinite(rawDuration) && rawDuration > 0 && rawDuration <= 86400 ? rawDuration : null;
   const id = crypto.randomUUID();
   const key = `workspaces/${user.workspace.id}/sources/${id}/${filename}`;
   const title = filename.replace(/\.[^.]+$/, "").slice(0, 180) || "Source video";
@@ -38,7 +40,7 @@ export async function onRequestPost({ request, env }) {
         `INSERT INTO source_videos
          (id, workspace_id, title, source_type, storage_key, mime_type, size_bytes, status, created_at, updated_at)
          VALUES (?, ?, ?, 'upload', ?, ?, ?, 'uploaded', ?, ?)`
-      ).bind(id, user.workspace.id, title, key, contentType, size, now, now).run();
+      ).bind(id, user.workspace.id, title, key, contentType, size, durationSeconds, now, now).run();
     } catch (databaseError) {
       await env.MEDIA.delete(key);
       throw databaseError;
@@ -46,7 +48,7 @@ export async function onRequestPost({ request, env }) {
     await env.DB.prepare(
       "INSERT INTO activity_logs (id, workspace_id, entity_type, entity_id, event, details, created_at) VALUES (?, ?, 'source_video', ?, 'source.uploaded', ?, ?)"
     ).bind(crypto.randomUUID(), user.workspace.id, id, JSON.stringify({ filename, sizeBytes: size, mimeType: contentType }), now).run();
-    return json({ ok: true, source: { id, title, filename, sizeBytes: size, mimeType: contentType, status: "uploaded", createdAt: now } }, 201);
+    return json({ ok: true, source: { id, title, filename, sizeBytes: size, mimeType: contentType, durationSeconds, status: "uploaded", createdAt: now } }, 201);
   } catch {
     return json({ ok: false, error: "Upload could not be saved. Please retry." }, 500);
   }
