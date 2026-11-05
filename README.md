@@ -18,7 +18,7 @@ AI-assisted short-form video production workspace.
 
 - Cloudflare Pages + Pages Functions
 - Cloudflare D1 for accounts, workspace and workflow metadata
-- Cloudflare R2 for source and rendered media (integration pending)
+- Cloudflare R2 for private source media storage (source upload integration implemented)
 - YouTube Data API for authorized publishing (integration pending)
 
 Heavy video processing will not run inside request-bound Pages Functions. A separate rendering runtime and durable job orchestration will be selected before implementing that pipeline.
@@ -35,7 +35,10 @@ Heavy video processing will not run inside request-bound Pages Functions. A sepa
 - Random opaque session tokens stored as SHA-256 hashes; HttpOnly, Secure, SameSite=Lax cookie; 7-day expiry
 - Login attempt throttling by account email
 - Workspace created for each new account
-- D1 schema and ordered migrations
+- D1 schema and ordered migrations, including workspace watermark settings
+- Authenticated source-video upload to private R2 (MP4, MOV, WebM, MKV, OGG; 90 MB endpoint limit)
+- Workspace-scoped source-video listing API
+- Workspace watermark settings API and 9:16 preview controls
 
 The dashboard does not pretend that upload, AI processing, rendering, or YouTube publishing is active before those services are configured.
 
@@ -56,7 +59,7 @@ Apply D1 migrations in order from the repository root:
 npx wrangler d1 migrations apply <DATABASE_NAME> --remote
 ```
 
-Wrangler reads the SQL files from `migrations/`. Apply both `0001_initial.sql` and `0002_auth.sql` in order. Do not apply `database/schema.sql` as well; it is a reference copy of the original base schema.
+Wrangler reads the SQL files from `migrations/`. Apply migrations in order: `0001_initial.sql`, `0002_auth.sql`, then `0003_workspace_settings.sql`. Do not apply `database/schema.sql` as well; it is a reference copy of the original base schema. Bind the private R2 bucket to Pages Functions as `MEDIA`.
 
 After binding D1 and applying migrations, deploy the Pages project and verify:
 
@@ -76,4 +79,4 @@ After binding D1 and applying migrations, deploy the Pages project and verify:
 
 ## Not implemented yet
 
-Video upload to R2, AI clip discovery, transcript/subtitle generation, video rendering, Review Center actions, YouTube OAuth, publishing queue workers and analytics.
+AI clip discovery, transcript/subtitle generation, actual watermark burn-in, video rendering, Review Center actions, YouTube OAuth, publishing queue workers and analytics. Source upload and watermark configuration are implemented, but must still be verified against the deployed Pages runtime and D1/R2 bindings.
