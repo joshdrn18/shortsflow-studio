@@ -1,0 +1,11 @@
+{
+  "name": "shortsflow-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "npm run check:js && npm run check:sql",
+    "check:js": "node --check assets/app.js && find functions -type f -name '*.js' -exec node --check {} \\;",
+    "check:sql": "python3 scripts/check_migrations.py"
+  }
+}
