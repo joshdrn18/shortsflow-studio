@@ -1,6 +1,6 @@
 (() => {
  const $=s=>document.querySelector(s);let busy=false;
- function drawCover(ctx,v,w,h){const sw=v.videoWidth,sh=v.videoHeight;if(!sw||!sh)return;const ratio=w/h,sr=sw/sh;let sx=0,sy=0,cw=sw,ch=sh;if(sr>ratio){cw=sh*ratio;sx=(sw-cw)/2;}else{ch=sw/ratio;sy=(sh-ch)/2;}ctx.drawImage(v,sx,sy,cw,ch,0,0,w,h);}
+ function drawCover(ctx,v,x,y,w,h){const sw=v.videoWidth,sh=v.videoHeight;if(!sw||!sh||w<=0||h<=0)return;const ratio=w/h,sr=sw/sh;let sx=0,sy=0,cw=sw,ch=sh;if(sr>ratio){cw=sh*ratio;sx=(sw-cw)/2;}else{ch=sw/ratio;sy=(sh-ch)/2;}ctx.drawImage(v,sx,sy,cw,ch,x,y,w,h);}
  function drawVerticalComposition(ctx,v,w,h){
   const sw=v.videoWidth,sh=v.videoHeight;if(!sw||!sh)return;
   ctx.save();ctx.fillStyle="#050608";ctx.fillRect(0,0,w,h);
@@ -11,6 +11,7 @@
   ctx.save();ctx.shadowColor="rgba(0,0,0,.58)";ctx.shadowBlur=34;ctx.shadowOffsetY=10;
   ctx.fillStyle="#08090d";round(ctx,x-2,y-2,dw+4,dh+4,18);ctx.fill();ctx.restore();
   ctx.save();round(ctx,x,y,dw,dh,16);ctx.clip();ctx.drawImage(v,x,y,dw,dh);ctx.restore();
+  return {x,y,w:dw,h:dh};
  }
  function round(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
  function drawWords(ctx,words,t,c,w,h){
@@ -44,7 +45,8 @@
   if(lines.length>2){lines=lines.slice(-2);}
   const lh=Math.round(size*1.28),gap=12,padX=22,padY=10;
   const totalH=lines.length*lh+(lines.length-1)*gap;
-  const centerY=c.position==="top"?h*.19:h*.79;
+  const videoBox=arguments[6]||{x:0,y:0,w,h};
+  const centerY=c.position==="top"?videoBox.y+videoBox.h*.22:videoBox.y+videoBox.h*.78;
   const top=centerY-totalH/2;
   ctx.save();ctx.font=`900 ${size}px Manrope,Arial,sans-serif`;ctx.textAlign="left";ctx.textBaseline="middle";
   lines.forEach((items,i)=>{
@@ -89,7 +91,7 @@
    recorder.addEventListener("dataavailable",e=>{if(e.data?.size)chunks.push(e.data);});
    v.pause();await seek(v,start);const started=performance.now();let last=0;
    const stop=()=>{if(stopped)return;stopped=true;cancelAnimationFrame(frame);v.pause();if(recorder&&recorder.state!=="inactive")recorder.stop();};
-   const draw=()=>{if(stopped)return;drawVerticalComposition(ctx,v,1080,1920);const t=v.currentTime-start;drawWords(ctx,sub.words||[],t,sub.config||{},1080,1920);drawMark(ctx,settings.settings||{},1080,1920);if(performance.now()-last>350){msg.textContent="Rendering in this browser… "+Math.round(Math.min(99,Math.max(0,t/duration*100)))+"%";last=performance.now();}if(v.currentTime>=end||v.ended){stop();return;}frame=requestAnimationFrame(draw);};
+   const draw=()=>{if(stopped)return;const videoBox=drawVerticalComposition(ctx,v,1080,1920);const t=v.currentTime-start;drawWords(ctx,sub.words||[],t,sub.config||{},1080,1920,videoBox);drawMark(ctx,settings.settings||{},1080,1920);if(performance.now()-last>350){msg.textContent="Rendering in this browser… "+Math.round(Math.min(99,Math.max(0,t/duration*100)))+"%";last=performance.now();}if(v.currentTime>=end||v.ended){stop();return;}frame=requestAnimationFrame(draw);};
    recorder.start(1000);await v.play();frame=requestAnimationFrame(draw);const timeout=setTimeout(stop,(duration+10)*1000);await done;clearTimeout(timeout);
    if(performance.now()-started<500)throw new Error("The source did not play long enough. Retry.");
    const blob=new Blob(chunks,{type:"video/webm"});if(blob.size<1024)throw new Error("Render output is empty. Check source playback and retry.");if(blob.size>90*1024*1024)throw new Error("Render exceeds the 90 MB limit. Try a shorter clip.");
