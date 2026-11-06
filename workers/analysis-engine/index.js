@@ -580,9 +580,59 @@ async function completeTranscript(env, job, payload, transcriptId) {
   ]);
 }
 
+
+async function processBrowserAudioChunk(request, env) {
+  if (!env.DB || !env.AI || !env.TRANSCRIBE_INGEST_SECRET) return json({ok:false,error:"Browser transcription service is not configured."},503);
+  const supplied=request.headers.get("X-ShortsFlow-Internal")||"", expected=env.TRANSCRIBE_INGEST_SECRET;
+  const a=new TextEncoder().encode(supplied),b=new TextEncoder().encode(expected);
+  if(a.length!==b.length)return json({ok:false,error:"Unauthorized."},401);
+  let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];if(diff)return json({ok:false,error:"Unauthorized."},401);
+  const sourceId=request.headers.get("X-Source-Id")||"",workspaceId=request.headers.get("X-Workspace-Id")||"";
+  const chunkIndex=Number(request.headers.get("X-Chunk-Index")),totalChunks=Number(request.headers.get("X-Total-Chunks")),duration=Number(request.headers.get("X-Source-Duration"));
+  const transcriptId=request.headers.get("X-Transcript-Id")||"";
+  if(!/^[0-9a-f-]{36}$/i.test(sourceId)||!workspaceId||!Number.isInteger(chunkIndex)||chunkIndex<0||!Number.isInteger(totalChunks)||totalChunks<1||totalChunks>30||chunkIndex>=totalChunks||!Number.isFinite(duration)||duration<=0||duration>1800)return json({ok:false,error:"Invalid transcription chunk details."},400);
+  const source=await env.DB.prepare("SELECT id,duration_seconds,size_bytes FROM source_videos WHERE id=? AND workspace_id=?").bind(sourceId,workspaceId).first();
+  if(!source)return json({ok:false,error:"Source video was not found in this workspace."},404);
+  if(Number(source.duration_seconds||0)>1800||Number(source.size_bytes||0)>200*1024*1024)return json({ok:false,error:"Source exceeds the 30-minute or 200 MB analysis limit."},413);
+  const audio=new Uint8Array(await request.arrayBuffer());
+  if(audio.byteLength<128||audio.byteLength>8*1024*1024)return json({ok:false,error:"Audio chunk is empty or exceeds the 8 MB chunk limit."},413);
+  let transcript;
+  if(chunkIndex===0){
+    const latest=await env.DB.prepare("SELECT COALESCE(MAX(version),0) AS version FROM source_transcripts WHERE source_video_id=?").bind(sourceId).first();
+    const id=crypto.randomUUID(),now=new Date().toISOString();
+    await env.DB.prepare("INSERT INTO source_transcripts (id,workspace_id,source_video_id,version,status,model,transcript_text,segments_json,created_at,updated_at) VALUES (?,?,?,?,'processing',?,'','[]',?,?)").bind(id,workspaceId,sourceId,Number(latest?.version||0)+1,MODEL,now,now).run();
+    transcript={id};
+  } else {
+    transcript=await env.DB.prepare("SELECT id FROM source_transcripts WHERE id=? AND workspace_id=? AND source_video_id=? AND status='processing'").bind(transcriptId,workspaceId,sourceId).first();
+    if(!transcript)return json({ok:false,error:"Transcription session expired. Start analysis again."},409);
+  }
+  const withinBudget=await reserveAiBudget(env,Math.min(60,Math.max(1,duration-chunkIndex*60)));
+  if(!withinBudget)return json({ok:false,error:"Daily AI safety budget reached. Retry after the UTC reset."},429);
+  const result=await env.AI.run(MODEL,{audio:Array.from(audio)});
+  const current=await env.DB.prepare("SELECT transcript_text,segments_json FROM source_transcripts WHERE id=? AND workspace_id=?").bind(transcript.id,workspaceId).first();
+  const offset=chunkIndex*60,nextText=[String(current?.transcript_text||""),String(result?.text||"").trim()].filter(Boolean).join(" ").slice(0,250000);
+  let prior=[];try{prior=JSON.parse(current?.segments_json||"[]");}catch{}
+  const words=Array.isArray(result?.words)?result.words.map(w=>({word:String(w.word||w.text||""),start:Number(w.start||0)+offset,end:Number(w.end||w.start||0)+offset})).filter(w=>w.word&&Number.isFinite(w.start)&&Number.isFinite(w.end)):[];
+  const combined=prior.concat(words).slice(0,30000),now=new Date().toISOString();
+  await env.DB.prepare("UPDATE source_transcripts SET transcript_text=?,segments_json=?,language=COALESCE(?,language),updated_at=? WHERE id=? AND workspace_id=?").bind(nextText,JSON.stringify(combined),String(result?.transcription_info?.language||result?.language||"")||null,now,transcript.id,workspaceId).run();
+  if(chunkIndex===totalChunks-1){
+    if(combined.length<1)return json({ok:false,error:"No timestamped speech was detected in this video."},422);
+    const now2=new Date().toISOString(),discoveryJobId=crypto.randomUUID(),key="discover_clips:"+workspaceId+":"+sourceId+":"+transcript.id;
+    await env.DB.batch([
+      env.DB.prepare("UPDATE source_transcripts SET status='completed',audio_duration_seconds=?,updated_at=? WHERE id=? AND workspace_id=?").bind(duration,now2,transcript.id,workspaceId),
+      env.DB.prepare("UPDATE source_videos SET status='ready',error_message=NULL,updated_at=? WHERE id=? AND workspace_id=?").bind(now2,sourceId,workspaceId),
+      env.DB.prepare("INSERT OR IGNORE INTO processing_jobs (id,workspace_id,source_video_id,job_type,status,idempotency_key,payload_json,created_at,updated_at) VALUES (?,?,?,'discover_clips','queued',?,?,?,?)").bind(discoveryJobId,workspaceId,sourceId,key,JSON.stringify({transcriptId:transcript.id,pipelineVersion:2}),now2,now2),
+      env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) VALUES (?,?,'source_video',?,'source.transcribed',?,?)").bind(crypto.randomUUID(),workspaceId,sourceId,JSON.stringify({transcriptId:transcript.id,model:MODEL,pipeline:"browser-ffmpeg"}),now2)
+    ]);
+    return json({ok:true,transcriptId:transcript.id,completed:true,words:combined.length});
+  }
+  return json({ok:true,transcriptId:transcript.id,completed:false,words:combined.length});
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/internal/transcribe-chunk") return processBrowserAudioChunk(request, env);
     if (request.method === "GET" && url.pathname === "/health") {
       return json({
         ok: true,
