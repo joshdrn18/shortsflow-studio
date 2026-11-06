@@ -4,7 +4,7 @@ import sqlite3
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
 
-expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql"]
+expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql"]
 actual = [path.name for path in MIGRATIONS]
 if actual != expected:
     raise SystemExit(f"Unexpected migration sequence: {actual}")
@@ -98,6 +98,17 @@ publish_columns = {row[1] for row in connection.execute("PRAGMA table_info(publi
 for required_column in ("render_asset_id", "metadata_version", "title", "description", "privacy_status", "tags_json"):
     if required_column not in publish_columns:
         raise SystemExit(f"publishing_jobs.{required_column} is missing")
+
+
+settings_positions = {row[0] for row in connection.execute(
+    "SELECT watermark_position FROM workspace_settings WHERE 1 = 0"
+)}
+for position in ("top-left", "top-center", "top-right", "center", "bottom-left", "bottom-center", "bottom-right"):
+    connection.execute(
+        "INSERT INTO workspace_settings (workspace_id, watermark_position) VALUES (?, ?)",
+        ("workspace-test", position),
+    )
+connection.execute("DELETE FROM workspace_settings WHERE workspace_id = 'workspace-test'")
 
 connection.commit()
 connection.close()
