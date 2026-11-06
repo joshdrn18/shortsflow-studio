@@ -100,15 +100,12 @@ for required_column in ("render_asset_id", "metadata_version", "title", "descrip
         raise SystemExit(f"publishing_jobs.{required_column} is missing")
 
 
-settings_positions = {row[0] for row in connection.execute(
-    "SELECT watermark_position FROM workspace_settings WHERE 1 = 0"
-)}
 for position in ("top-left", "top-center", "top-right", "center", "bottom-left", "bottom-center", "bottom-right"):
     connection.execute(
-        "INSERT INTO workspace_settings (workspace_id, watermark_position) VALUES (?, ?)",
+        "INSERT INTO workspace_settings (workspace_id, watermark_position) VALUES (?, ?) "
+        "ON CONFLICT(workspace_id) DO UPDATE SET watermark_position=excluded.watermark_position",
         ("workspace-test", position),
     )
-connection.execute("DELETE FROM workspace_settings WHERE workspace_id = 'workspace-test'")
 
 connection.commit()
 connection.close()
