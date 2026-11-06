@@ -1,7 +1,7 @@
 import { json, getSessionUser } from "../../_lib/auth.js";
 
 export async function onRequestPost({ request, env, params }) {
-  if (!env.DB || !env.ANALYSIS_ENGINE || !env.TRANSCRIBE_INGEST_SECRET) {
+  if (!env.DB || !env.ANALYSIS_ENGINE || !env.YOUTUBE_TOKEN_ENCRYPTION_KEY) {
     return json({ ok:false, error:"Browser transcription service is not configured yet." },503);
   }
   const user=await getSessionUser(request,env);
@@ -21,7 +21,7 @@ export async function onRequestPost({ request, env, params }) {
   if(chunkIndex>0&&!/^[0-9a-f-]{36}$/i.test(transcriptId))return json({ok:false,error:"Transcription session is missing. Restart analysis."},409);
   const headers=new Headers({
     "Content-Type":request.headers.get("Content-Type")||"application/octet-stream",
-    "X-ShortsFlow-Internal":env.TRANSCRIBE_INGEST_SECRET,
+    "X-ShortsFlow-Internal":await (async()=>{const key=await crypto.subtle.importKey("raw",Uint8Array.from(atob(env.YOUTUBE_TOKEN_ENCRYPTION_KEY),c=>c.charCodeAt(0)),{name:"HMAC",hash:"SHA-256"},false,["sign"]);const sig=await crypto.subtle.sign("HMAC",key,new TextEncoder().encode("shortsflow-browser-transcription-ingest-v1"));return Array.from(new Uint8Array(sig),b=>b.toString(16).padStart(2,"0")).join("");})(),
     "X-Source-Id":sourceId,
     "X-Workspace-Id":workspaceId,
     "X-Chunk-Index":String(chunkIndex),
