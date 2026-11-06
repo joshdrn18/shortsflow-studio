@@ -21,7 +21,7 @@ export async function onRequestPost({ request, env, params }) {
   if(chunkIndex>0&&!/^[0-9a-f-]{36}$/i.test(transcriptId))return json({ok:false,error:"Transcription session is missing. Restart analysis."},409);
   const headers=new Headers({
     "Content-Type":request.headers.get("Content-Type")||"application/octet-stream",
-    "X-ShortsFlow-Internal":await (async()=>{const key=await crypto.subtle.importKey("raw",Uint8Array.from(atob(env.YOUTUBE_TOKEN_ENCRYPTION_KEY),c=>c.charCodeAt(0)),{name:"HMAC",hash:"SHA-256"},false,["sign"]);const sig=await crypto.subtle.sign("HMAC",key,new TextEncoder().encode("shortsflow-browser-transcription-ingest-v1"));return Array.from(new Uint8Array(sig),b=>b.toString(16).padStart(2,"0")).join("");})(),
+    "X-ShortsFlow-Internal":await (async()=>{const key=await crypto.subtle.importKey("raw",Uint8Array.from(atob((env.YOUTUBE_TOKEN_ENCRYPTION_KEY.replace(/-/g,"+").replace(/_/g,"/")+"=".repeat((4-env.YOUTUBE_TOKEN_ENCRYPTION_KEY.length%4)%4))),c=>c.charCodeAt(0)),{name:"HMAC",hash:"SHA-256"},false,["sign"]);const sig=await crypto.subtle.sign("HMAC",key,new TextEncoder().encode("shortsflow-browser-transcription-ingest-v1"));return Array.from(new Uint8Array(sig),b=>b.toString(16).padStart(2,"0")).join("");})(),
     "X-Source-Id":sourceId,
     "X-Workspace-Id":workspaceId,
     "X-Chunk-Index":String(chunkIndex),
