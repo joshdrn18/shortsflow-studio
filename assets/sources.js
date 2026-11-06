@@ -114,7 +114,7 @@
     if(!mime.includes("mp4"))throw new Error("Browser audio extraction currently requires an MP4 source.");
     await ffmpeg.writeFile("source.mp4",new Uint8Array(await sourceBlob.arrayBuffer()));
     progress("Extracting audio into 60-second chunks…",8);
-    const exit=await ffmpeg.exec(["-i","source.mp4","-map","0:a:0","-vn","-ac","1","-ar","16000","-c:a","pcm_s16le","-f","segment","-segment_time","60","-reset_timestamps","1","/audio-%03d.wav"]);
+    const exit=await ffmpeg.exec(["-i","source.mp4","-map","0:a:0","-vn","-ac","1","-ar","16000","-c:a","pcm_s16le","-f","segment","-segment_time","60","-reset_timestamps","1","audio-%03d.wav"]);
     if(exit!==0)throw new Error("Audio extraction failed. Check that the MP4 contains an audio track.");
     const total=Math.ceil(durationSeconds/60);
     let transcriptId="";
