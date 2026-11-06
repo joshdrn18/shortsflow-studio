@@ -582,8 +582,11 @@ async function completeTranscript(env, job, payload, transcriptId) {
 
 
 async function processBrowserAudioChunk(request, env) {
-  if (!env.DB || !env.AI || !env.TRANSCRIBE_INGEST_SECRET) return json({ok:false,error:"Browser transcription service is not configured."},503);
-  const supplied=request.headers.get("X-ShortsFlow-Internal")||"", expected=env.TRANSCRIBE_INGEST_SECRET;
+  if (!env.DB || !env.AI || !env.YOUTUBE_TOKEN_ENCRYPTION_KEY) return json({ok:false,error:"Browser transcription service is not configured."},503);
+  const supplied=request.headers.get("X-ShortsFlow-Internal")||"";
+  const key=await crypto.subtle.importKey("raw",decodeBase64(env.YOUTUBE_TOKEN_ENCRYPTION_KEY),{name:"HMAC",hash:"SHA-256"},false,["sign"]);
+  const signature=await crypto.subtle.sign("HMAC",key,new TextEncoder().encode("shortsflow-browser-transcription-ingest-v1"));
+  const expected=Array.from(new Uint8Array(signature),b=>b.toString(16).padStart(2,"0")).join("");
   const a=new TextEncoder().encode(supplied),b=new TextEncoder().encode(expected);
   if(a.length!==b.length)return json({ok:false,error:"Unauthorized."},401);
   let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];if(diff)return json({ok:false,error:"Unauthorized."},401);
