@@ -101,7 +101,7 @@
     progress("Loading local video processor…",2);
     const coreBase="https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
     await ffmpeg.load({
-      workerURL:await toBlobURL("https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/worker.js","text/javascript"),
+      classWorkerURL:location.origin+"/assets/ffmpeg-worker.js",
       coreURL:await toBlobURL(coreBase+"/ffmpeg-core.js","text/javascript"),
       wasmURL:await toBlobURL(coreBase+"/ffmpeg-core.wasm","application/wasm")
     });
