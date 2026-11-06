@@ -14,7 +14,7 @@
   return {x,y,w:dw,h:dh};
  }
  function round(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
- function drawWords(ctx,words,t,c,w,h){
+ function drawWords(ctx,words,t,c,w,h,videoBox){
   if(!c.enabled||!Array.isArray(words)||!words.length)return;
   const active=words.findIndex(x=>t>=Number(x.start)&&t<=Number(x.end));
   if(active<0)return;
@@ -45,8 +45,8 @@
   if(lines.length>2){lines=lines.slice(-2);}
   const lh=Math.round(size*1.28),gap=12,padX=22,padY=10;
   const totalH=lines.length*lh+(lines.length-1)*gap;
-  const videoBox=arguments[6]||{x:0,y:0,w,h};
-  const centerY=c.position==="top"?videoBox.y+videoBox.h*.22:videoBox.y+videoBox.h*.78;
+  const frame=videoBox||{x:0,y:0,w,h};
+  const centerY=c.position==="top"?frame.y+frame.h*.22:frame.y+frame.h*.78;
   const top=centerY-totalH/2;
   ctx.save();ctx.font=`900 ${size}px Manrope,Arial,sans-serif`;ctx.textAlign="left";ctx.textBaseline="middle";
   lines.forEach((items,i)=>{
