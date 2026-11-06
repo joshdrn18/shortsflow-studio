@@ -9,7 +9,7 @@
     if ($("#sources-workspace")) return;
     const panel=document.createElement("section");
     panel.id="sources-workspace"; panel.className="sources-workspace hidden";
-    panel.innerHTML='<section class="source-intake"><div class="source-intake-copy"><span class="source-kicker">SOURCE LIBRARY</span><h2>Bring your footage in.</h2><p>Upload original videos to your private workspace. ShortsFlow will transcribe and discover the strongest moments.</p><div class="source-specs"><span> <i></i> Private R2 storage</span><span>Up to 200 MB</span><span>MP4 analysis · 30 min max · 100 MB analysis input cap</span></div></div><div class="source-dropzone" id="source-dropzone" tabindex="0" role="button" aria-label="Choose a video to upload"><div class="source-upload-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 16.5v2A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><strong>Drop a video here</strong><span>or choose a file from your device</span><button class="primary-button" type="button" id="choose-source-btn">Browse videos <span>↗</span></button><small>MP4, MOV, WebM or MKV · 200 MB maximum</small></div></section><div class="upload-progress hidden" id="upload-progress"><div class="progress-heading"><strong id="upload-filename">Uploading video</strong><span id="upload-percent">0%</span></div><div class="progress-track"><i id="upload-progress-bar"></i></div><p id="upload-status">Preparing secure upload…</p></div><section class="source-queue-section"><div class="source-section-heading"><div><span class="source-kicker">BACKGROUND WORK</span><h3>Processing queue</h3><p>Track transcription and AI clip discovery jobs.</p></div><button class="text-button" id="refresh-jobs-btn">↻ Refresh</button></div><div id="jobs-list" class="jobs-list"></div></section><section class="source-library-section"><div class="source-section-heading"><div><span class="source-kicker">YOUR ASSETS</span><h3>Source videos <span id="source-count" class="source-count">0</span></h3><p>Original files stored privately in your workspace.</p></div><button class="text-button" id="refresh-sources-btn">↻ Refresh</button></div><div id="sources-list" class="sources-list"></div></section><dialog id="source-preview-dialog" class="source-preview-dialog"><div class="source-preview-head"><div><strong id="source-preview-title">Video preview</strong><small>Private workspace preview</small></div><button type="button" id="source-preview-close" class="text-button">Close ✕</button></div><video id="source-preview-video" controls playsinline preload="metadata"></video><p id="source-preview-message" role="status">Loading preview…</p></dialog>';
+    panel.innerHTML='<section class="source-intake"><div class="source-intake-copy"><span class="source-kicker">SOURCE LIBRARY</span><h2>Bring your footage in.</h2><p>Upload original videos to your private workspace. ShortsFlow will transcribe and discover the strongest moments.</p><div class="source-specs"><span> <i></i> Private R2 storage</span><span>Up to 200 MB</span><span>MP4 analysis · 30 min max · 200 MB input</span></div></div><div class="source-dropzone" id="source-dropzone" tabindex="0" role="button" aria-label="Choose a video to upload"><div class="source-upload-glyph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 16.5v2A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div><strong>Drop a video here</strong><span>or choose a file from your device</span><button class="primary-button" type="button" id="choose-source-btn">Browse videos <span>↗</span></button><small>MP4, MOV, WebM or MKV · 200 MB maximum</small></div></section><div class="upload-progress hidden" id="upload-progress"><div class="progress-heading"><strong id="upload-filename">Uploading video</strong><span id="upload-percent">0%</span></div><div class="progress-track"><i id="upload-progress-bar"></i></div><p id="upload-status">Preparing secure upload…</p></div><section class="source-queue-section"><div class="source-section-heading"><div><span class="source-kicker">BACKGROUND WORK</span><h3>Processing queue</h3><p>Track transcription and AI clip discovery jobs.</p></div><button class="text-button" id="refresh-jobs-btn">↻ Refresh</button></div><div id="jobs-list" class="jobs-list"></div></section><section class="source-library-section"><div class="source-section-heading"><div><span class="source-kicker">YOUR ASSETS</span><h3>Source videos <span id="source-count" class="source-count">0</span></h3><p>Original files stored privately in your workspace.</p></div><button class="text-button" id="refresh-sources-btn">↻ Refresh</button></div><div id="sources-list" class="sources-list"></div></section><dialog id="source-preview-dialog" class="source-preview-dialog"><div class="source-preview-head"><div><strong id="source-preview-title">Video preview</strong><small>Private workspace preview</small></div><button type="button" id="source-preview-close" class="text-button">Close ✕</button></div><video id="source-preview-video" controls playsinline preload="metadata"></video><p id="source-preview-message" role="status">Loading preview…</p></dialog>';
     panel.insertAdjacentHTML("beforeend", '<dialog id="source-transcript-dialog" class="source-preview-dialog"><div class="source-preview-head"><div><strong id="source-transcript-title">Transcript</strong><small id="source-transcript-meta">AI-generated transcript</small></div><div class="source-row-actions"><button type="button" id="source-transcript-vtt" class="text-button">Download VTT</button><button type="button" id="source-transcript-close" class="text-button">Close ✕</button></div></div><pre id="source-transcript-text" class="source-transcript-text"></pre></dialog>');
     $(".page-heading").after(panel);
     $("#choose-source-btn").addEventListener("click",()=>$("#source-file").click());
@@ -94,13 +94,66 @@
       await loadJobs();
     } catch(e){button.disabled=false;button.textContent=label;alert(e.message);}
   }
+  async function transcribeSourceInBrowser(sourceId, durationSeconds, progress) {
+    const { FFmpeg } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js");
+    const { toBlobURL } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js");
+    const ffmpeg = new FFmpeg();
+    progress("Loading local video processor…",2);
+    const coreBase="https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
+    await ffmpeg.load({
+      coreURL:await toBlobURL(coreBase+"/ffmpeg-core.js","text/javascript"),
+      wasmURL:coreBase+"/ffmpeg-core.wasm"
+    });
+    progress("Fetching your private source video…",5);
+    const response=await fetch("/api/sources/"+encodeURIComponent(sourceId),{cache:"no-store"});
+    if(!response.ok)throw new Error("Could not read the private source video.");
+    const sourceBlob=await response.blob();
+    if(sourceBlob.size>200*1024*1024)throw new Error("Source exceeds the 200 MB analysis limit.");
+    const mime=response.headers.get("Content-Type")||"video/mp4";
+    if(!mime.includes("mp4"))throw new Error("Browser audio extraction currently requires an MP4 source.");
+    await ffmpeg.writeFile("source.mp4",new Uint8Array(await sourceBlob.arrayBuffer()));
+    progress("Extracting audio into 60-second chunks…",8);
+    const exit=await ffmpeg.exec(["-i","source.mp4","-map","0:a:0","-vn","-ac","1","-ar","16000","-c:a","pcm_s16le","-f","segment","-segment_time","60","-reset_timestamps","1","/audio-%03d.wav"]);
+    if(exit!==0)throw new Error("Audio extraction failed. Check that the MP4 contains an audio track.");
+    const total=Math.ceil(durationSeconds/60);
+    let transcriptId="";
+    for(let index=0;index<total;index++){
+      const filename="audio-"+String(index).padStart(3,"0")+".wav";
+      let audio;
+      try{audio=await ffmpeg.readFile(filename);}catch{throw new Error("Audio chunk "+(index+1)+" of "+total+" could not be extracted.");}
+      if(!(audio instanceof Uint8Array)||audio.byteLength<128)throw new Error("Audio chunk "+(index+1)+" is empty.");
+      progress("Transcribing audio chunk "+(index+1)+" of "+total+"…",10+Math.round((index/total)*85));
+      const result=await fetch("/api/sources/"+encodeURIComponent(sourceId)+"/transcribe",{
+        method:"POST",
+        headers:{"Content-Type":"audio/wav","X-Chunk-Index":String(index),"X-Total-Chunks":String(total),"X-Transcript-Id":transcriptId},
+        body:audio
+      });
+      const data=await result.json().catch(()=>({}));
+      if(!result.ok||!data.ok)throw new Error(data.error||"Transcription failed on chunk "+(index+1)+".");
+      transcriptId=data.transcriptId||transcriptId;
+      await ffmpeg.deleteFile(filename).catch(()=>{});
+    }
+    await ffmpeg.deleteFile("source.mp4").catch(()=>{});
+    await ffmpeg.terminate();
+    progress("Transcription complete. Clip discovery is queued…",100);
+  }
   async function queueSource(sourceId,button) {
-    button.disabled=true;button.textContent="Queueing…";
+    button.disabled=true;button.textContent="Preparing…";
+    const box=$("#upload-progress"),bar=$("#upload-progress-bar"),pct=$("#upload-percent"),status=$("#upload-status");
+    box.classList.remove("hidden");$("#upload-filename").textContent="AI audio transcription";bar.style.width="0%";pct.textContent="0%";status.classList.remove("error-text");
     try {
-      const r=await fetch("/api/jobs",{method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify({sourceId,jobType:"analyze_source"})});
-      const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"Could not queue analysis.");
-      button.textContent=d.reused?"Already queued":"Queued"; await loadJobs();
-    } catch(e){button.disabled=false;button.textContent="Queue analysis";alert(e.message);}
+      const sourceResponse=await fetch("/api/sources",{headers:{accept:"application/json"}});
+      const sourceData=await sourceResponse.json();
+      const source=(sourceData.sources||[]).find(item=>item.id===sourceId);
+      if(!source)throw new Error("Source video not found. Refresh the source list.");
+      const duration=Number(source.durationSeconds||0);
+      if(!Number.isFinite(duration)||duration<=0||duration>1800)throw new Error("Browser transcription supports MP4 videos up to 30 minutes.");
+      await transcribeSourceInBrowser(sourceId,duration,(message,value)=>{status.textContent=message;bar.style.width=value+"%";pct.textContent=value+"%";});
+      button.textContent="Transcribed";await load();await loadJobs();
+    } catch(error) {
+      status.textContent=error.message||"Transcription failed. Retry analysis.";
+      status.classList.add("error-text");button.disabled=false;button.textContent="Retry analysis";
+    }
   }
   async function upload(file) {
     if(!allowed.has(file.type)){alert("Unsupported format. Use MP4, MOV, WebM, MKV or OGG.");return;}
