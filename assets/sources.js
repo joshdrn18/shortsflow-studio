@@ -101,8 +101,9 @@
     progress("Loading local video processor…",2);
     const coreBase="https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
     await ffmpeg.load({
+      workerURL:await toBlobURL("https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/worker.js","text/javascript"),
       coreURL:await toBlobURL(coreBase+"/ffmpeg-core.js","text/javascript"),
-      wasmURL:coreBase+"/ffmpeg-core.wasm"
+      wasmURL:await toBlobURL(coreBase+"/ffmpeg-core.wasm","application/wasm")
     });
     progress("Fetching your private source video…",5);
     const response=await fetch("/api/sources/"+encodeURIComponent(sourceId),{cache:"no-store"});
