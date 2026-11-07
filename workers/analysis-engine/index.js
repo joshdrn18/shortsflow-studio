@@ -347,7 +347,7 @@ async function processNextJob(env) {
     let priorWords = [];
     try { priorWords = JSON.parse(current?.segments_json || "[]"); } catch { priorWords = []; }
     const words = Array.isArray(result?.words) ? result.words.map(word => {
-      const token = String(word?.word || word?.text || "").replace(/\\s+/g, " ").trim();
+      const token = String(word?.word || word?.text || "").replace(/\s+/g, " ").trim();
       const localStart = Number(word?.start);
       const localEnd = Number(word?.end);
       if (!token || !Number.isFinite(localStart) || !Number.isFinite(localEnd) || localEnd <= localStart) return null;
