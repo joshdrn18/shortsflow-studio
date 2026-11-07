@@ -346,12 +346,27 @@ async function processNextJob(env) {
     const nextText = [priorText, String(result?.text || "").trim()].filter(Boolean).join(" ").slice(0, 250000);
     let priorWords = [];
     try { priorWords = JSON.parse(current?.segments_json || "[]"); } catch { priorWords = []; }
-    const words = Array.isArray(result?.words) ? result.words.map(word => ({
-      word: String(word.word || word.text || ""),
-      start: Number(word.start || 0) + startSeconds,
-      end: Number(word.end || word.start || 0) + startSeconds
-    })).filter(word => word.word && Number.isFinite(word.start) && Number.isFinite(word.end)) : [];
-    const nextWords = priorWords.concat(words).slice(0, 30000);
+    const words = Array.isArray(result?.words) ? result.words.map(word => {
+      const token = String(word?.word || word?.text || "").replace(/\\s+/g, " ").trim();
+      const localStart = Number(word?.start);
+      const localEnd = Number(word?.end);
+      if (!token || !Number.isFinite(localStart) || !Number.isFinite(localEnd) || localEnd <= localStart) return null;
+      const start = Math.max(0, Math.min(chunkDuration, localStart)) + startSeconds;
+      const end = Math.max(0, Math.min(chunkDuration, localEnd)) + startSeconds;
+      return end > start ? { word: token, start, end } : null;
+    }).filter(Boolean) : [];
+    const orderedWords = priorWords.concat(words).filter(word =>
+      word && typeof word.word === "string" && Number.isFinite(Number(word.start)) &&
+      Number.isFinite(Number(word.end)) && Number(word.end) > Number(word.start)
+    ).sort((a, b) => Number(a.start) - Number(b.start));
+    const nextWords = orderedWords.filter((word, index, all) => {
+      const previous = all[index - 1];
+      return !previous || (
+        String(previous.word).trim().toLowerCase() !== String(word.word).trim().toLowerCase() ||
+        Math.abs(Number(previous.start) - Number(word.start)) > 0.025 ||
+        Math.abs(Number(previous.end) - Number(word.end)) > 0.04
+      );
+    }).slice(0, 30000);
     const now = new Date().toISOString();
     const nextIndex = chunkIndex + 1;
     const totalChunks = Math.ceil(duration / CHUNK_SECONDS);
