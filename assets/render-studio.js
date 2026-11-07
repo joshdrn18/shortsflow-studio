@@ -16,7 +16,7 @@
  function round(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
  function drawWords(ctx,words,t,c,w,h,videoBox){
   if(!c.enabled||!Array.isArray(words)||!words.length||!Number.isFinite(t))return;
-  const clean=words.map((item,index)=>({item,index,word:String(item?.word||"").replace(/\\s+/g," ").trim(),start:Number(item?.start),end:Number(item?.end)}))
+  const clean=words.map((item,index)=>({item,index,word:String(item?.word||"").replace(/\s+/g," ").trim(),start:Number(item?.start),end:Number(item?.end)}))
    .filter(x=>x.word&&Number.isFinite(x.start)&&Number.isFinite(x.end)&&x.end>x.start);
   if(!clean.length)return;
   const active=clean.findIndex(x=>t>=x.start&&t<=x.end);
@@ -25,7 +25,7 @@
   for(let i=0;i<clean.length;i++){
    const item=clean[i],prev=group[group.length-1];
    const gap=prev?item.start-prev.end:0;
-   const punctuation=prev&&/[.!?…][”’"')\\]]*$/.test(prev.word);
+   const punctuation=prev&&/[.!?…][”’"')\]]*$/.test(prev.word);
    if(group.length&&(group.length>=4||gap>.65||punctuation)){groups.push(group);group=[];}
    group.push(item);
   }
@@ -35,7 +35,7 @@
   const scale=Math.max(.82,Math.min(1.65,(Number(c.fontSize)||28)/28));
   let size=Math.round(49*scale),maxWidth=w*.86,lines=[];
   const buildLines=fontSize=>{
-   ctx.font=`900 ${fontSize}px Manrope,Arial,sans-serif`;
+   ctx.font=\`900 \${fontSize}px Manrope,Arial,sans-serif\`;
    const out=[];let line=[];
    for(const token of current){
     const test=[...line,token],width=ctx.measureText(test.map(x=>x.word).join(" ")).width;
@@ -57,7 +57,7 @@
   const centerY=c.position==="top"?frame.y+frame.h*.2:frame.y+frame.h*.8;
   const minY=frame.y+lh*.65,maxY=frame.y+frame.h-lh*.65;
   const top=Math.max(minY,Math.min(maxY-totalH,centerY-totalH/2));
-  ctx.save();ctx.font=`900 ${size}px Manrope,Arial,sans-serif`;ctx.textAlign="left";ctx.textBaseline="middle";
+  ctx.save();ctx.font=\`900 \${size}px Manrope,Arial,sans-serif\`;ctx.textAlign="left";ctx.textBaseline="middle";
   lines.forEach((items,i)=>{
    const widths=items.map(token=>ctx.measureText(token.word).width);
    const space=ctx.measureText(" ").width;
