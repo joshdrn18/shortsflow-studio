@@ -108,7 +108,7 @@
     const xhr=new XMLHttpRequest();xhr.open("POST","/api/clips/"+encodeURIComponent(clip.id)+"/render");xhr.withCredentials=true;xhr.timeout=300000;
     xhr.setRequestHeader("Content-Type","video/webm");xhr.setRequestHeader("X-Metadata-Version",String(mv));
     xhr.upload.addEventListener("progress",event=>{
-     if(event.lengthComputable){const percent=Math.round(event.loaded/event.total*100),sent=(event.loaded/1048576).toFixed(1),total=(event.total/1048576).toFixed(1);msg.textContent="Uploading to private R2 storage… "+percent+"% · "+sent+" / "+total+" MB";}
+     if(event.lengthComputable){const percent=Math.round(event.loaded/event.total*100),sent=(event.loaded/1048576).toFixed(1),total=(event.total/1048576).toFixed(1);msg.textContent=percent>=100?"Upload complete. Verifying the video in private R2 storage…":"Uploading to private R2 storage… "+percent+"% · "+sent+" / "+total+" MB";}
      else msg.textContent="Uploading render to private R2 storage…";
     });
     xhr.addEventListener("load",()=>{
