@@ -83,10 +83,13 @@
   const changedCut=Math.abs(Number(window.__shortsflowClipStart)-Number(clip.startSeconds))>.05||Math.abs(Number(window.__shortsflowClipEnd)-Number(clip.endSeconds))>.05;
   const changedMeta=$("#clip-edit-title")?.value.trim()!==(clip.title||"")||$("#clip-edit-caption")?.value.trim()!==(clip.caption||"")||$("#clip-edit-hashtags")?.value.trim()!==(clip.hashtags||"")||$("#clip-edit-language")?.value.trim()!==(clip.language||"");
   if(changedCut||changedMeta||window.__shortsflowSubtitleDirty||window.__shortsflowWatermarkDirty){msg.textContent="Save your clip edits, subtitle style and watermark settings first, then render again.";return;}
-  busy=true;btn.disabled=true;btn.textContent="Preparing…";let recorder=null,canvasStream=null,sourceStream=null,frame=0,stopped=false,xhr=null;\n  const cancelBtn=document.createElement("button");cancelBtn.type="button";cancelBtn.id="clip-render-cancel";cancelBtn.className=btn.className;cancelBtn.textContent="Cancel render";cancelBtn.style.marginLeft="8px";btn.insertAdjacentElement("afterend",cancelBtn);\n  const task={cancelled:false,cancel(){if(this.cancelled)return;this.cancelled=true;stopped=true;cancelAnimationFrame(frame);try{if(v&&!v.paused)v.pause();}catch{}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(xhr&&xhr.readyState!==XMLHttpRequest.DONE)xhr.abort();msg.textContent="Render cancelled. No new render was saved.";}};activeCancel=task;cancelBtn.addEventListener("click",()=>task.cancel());
+  busy=true;btn.disabled=true;btn.textContent="Preparing…";let recorder=null,canvasStream=null,sourceStream=null,frame=0,stopped=false,xhr=null;
+  const cancelBtn=document.createElement("button");cancelBtn.type="button";cancelBtn.id="clip-render-cancel";cancelBtn.className=btn.className;cancelBtn.textContent="Cancel render";cancelBtn.style.marginLeft="8px";btn.insertAdjacentElement("afterend",cancelBtn);
+  const task={cancelled:false,cancel(){if(this.cancelled)return;this.cancelled=true;stopped=true;cancelAnimationFrame(frame);try{if(v&&!v.paused)v.pause();}catch{}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(xhr&&xhr.readyState!==XMLHttpRequest.DONE)xhr.abort();msg.textContent="Render cancelled. No new render was saved.";}};activeCancel=task;cancelBtn.addEventListener("click",()=>task.cancel());
   try{
    msg.textContent="Loading saved cut, subtitles and watermark…";
    const [sub,settings]=await Promise.all([getJson("/api/clips/"+encodeURIComponent(clip.id)+"/subtitles"),getJson("/api/workspace/settings")]);
+   if(task.cancelled)return;
    const c=sub.clip,start=Number(c.startSeconds),end=Number(c.endSeconds),duration=end-start,mv=Number(c.metadataVersion);
    if(!mv||duration<1||duration>180)throw new Error("Save the clip cut and subtitle style first. Clip duration must be 1–180 seconds.");
    if(v.readyState<2||!v.videoWidth)throw new Error("Wait until the source video preview is ready.");
