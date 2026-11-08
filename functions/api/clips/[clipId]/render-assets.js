@@ -19,8 +19,8 @@ export async function onRequestGet({request,env,params}){
    FROM clip_assets a
    WHERE a.clip_id=? AND a.asset_type='render'
     AND a.version<(SELECT MAX(x.version) FROM clip_assets x WHERE x.clip_id=a.clip_id AND x.asset_type='render')
-    AND NOT EXISTS(SELECT 1 FROM clip_reviews r WHERE r.render_asset_id=a.id)
-    AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.render_asset_id=a.id)
+    AND NOT EXISTS(SELECT 1 FROM clip_reviews r WHERE r.render_asset_id=a.id OR (r.render_asset_id IS NULL AND r.clip_id=a.clip_id AND r.asset_version=a.version))
+    AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.render_asset_id=a.id OR (p.render_asset_id IS NULL AND p.clip_id=a.clip_id))
    ORDER BY a.version ASC
   `).bind(clipId).all();
   const items=(result.results||[]).map(row=>({id:row.id,version:Number(row.version),sizeBytes:Number(row.size_bytes||0),createdAt:row.created_at}));
@@ -48,8 +48,8 @@ export async function onRequestDelete({request,env,params}){
    DELETE FROM clip_assets
    WHERE id=? AND clip_id=? AND asset_type='render'
     AND version<(SELECT MAX(x.version) FROM clip_assets x WHERE x.clip_id=clip_assets.clip_id AND x.asset_type='render')
-    AND NOT EXISTS(SELECT 1 FROM clip_reviews r WHERE r.render_asset_id=clip_assets.id)
-    AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.render_asset_id=clip_assets.id)
+    AND NOT EXISTS(SELECT 1 FROM clip_reviews r WHERE r.render_asset_id=clip_assets.id OR (r.render_asset_id IS NULL AND r.clip_id=clip_assets.clip_id AND r.asset_version=clip_assets.version))
+    AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.render_asset_id=clip_assets.id OR (p.render_asset_id IS NULL AND p.clip_id=clip_assets.clip_id))
   `).bind(assetId,clipId).run();
   if(Number(deleted.meta?.changes||0)!==1)return json({ok:false,error:"The render changed while cleaning up. Refresh the list before retrying."},409);
   return json({ok:true,deleted:true,assetId,sizeBytes:Number(asset.size_bytes||0)});
