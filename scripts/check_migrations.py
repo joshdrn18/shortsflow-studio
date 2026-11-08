@@ -4,7 +4,7 @@ import sqlite3
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
 
-expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql"]
+expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql"]
 actual = [path.name for path in MIGRATIONS]
 if actual != expected:
     raise SystemExit(f"Unexpected migration sequence: {actual}")
@@ -41,6 +41,7 @@ required = {
     "ai_usage_reservations",
     "youtube_connections",
     "youtube_oauth_states",
+    "workspace_brand_kits",
 }
 missing = required - tables
 if missing:
@@ -107,6 +108,18 @@ for position in ("top-left", "top-center", "top-right", "center", "bottom-left",
         "ON CONFLICT(workspace_id) DO UPDATE SET watermark_position=excluded.watermark_position",
         ("workspace-test", position),
     )
+
+# Workspace Brand Kits persist reusable subtitle and watermark configuration.
+connection.execute(
+    "INSERT INTO workspace_brand_kits (workspace_id, kit_name, subtitle_config_json, watermark_config_json) VALUES (?, ?, ?, ?)",
+    ("workspace-test", "Creator Brand", '{"fontSize":30,"animation":"pop"}', '{"watermarkText":"CREATOR"}'),
+)
+brand_kit = connection.execute(
+    "SELECT kit_name, subtitle_config_json, watermark_config_json FROM workspace_brand_kits WHERE workspace_id=?",
+    ("workspace-test",),
+).fetchone()
+if brand_kit != ("Creator Brand", '{"fontSize":30,"animation":"pop"}', '{"watermarkText":"CREATOR"}'):
+    raise SystemExit("Workspace Brand Kit persistence check failed")
 
 # AI reservations must be idempotent and the daily cap must be enforced atomically.
 connection.execute(
