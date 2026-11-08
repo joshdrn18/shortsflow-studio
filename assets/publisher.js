@@ -1,6 +1,6 @@
 (() => {
  const $=s=>document.querySelector(s),esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- let state={connection:null,jobs:[],eligible:[],loading:false};
+ let state={connection:null,jobs:[],eligible:[],loading:false,profiles:[],activeProfileId:null};
  const date=v=>{if(!v)return"Publish as soon as the uploader is available";const d=new Date(v);return Number.isNaN(d.getTime())?"—":d.toLocaleString([], {dateStyle:"medium",timeStyle:"short"});};
  function ensure(){
   if($("#publisher-workspace"))return;
@@ -12,7 +12,7 @@
    <section class="publisher-section"><div class="publisher-section-head"><div><span class="publisher-kicker">UPLOAD PLANNER</span><h3>Prepare a YouTube Short</h3><p>Pick a clip approved in Review Center. Its approval is checked again when you queue it.</p></div></div>
     <form id="publisher-form" class="publisher-form">
      <label>Approved render<select id="publisher-clip" required><option value="">Loading approved renders…</option></select></label>
-     <label>Video title<input id="publisher-title" maxlength="100" required placeholder="Give your Short a clear title"></label>
+     <div class="publisher-brand-meta"><div class="publisher-brand-meta-head"><div><b>Brand metadata profile</b><small>Use saved channel-specific title, description and hashtag rules.</small></div><select id="publisher-brand-profile"><option value="">Loading profiles…</option></select></div><div class="publisher-meta-fields"><label>Title template<input id="publisher-title-template" maxlength="100" placeholder="{clip_title} #Shorts"></label><label>Description template<textarea id="publisher-description-template" rows="2" maxlength="4000" placeholder="{clip_title}\n\n{hashtags}"></textarea></label><label>Hashtags<input id="publisher-hashtag-template" maxlength="500" placeholder="#shorts, #gaming"></label><label>Default tags<input id="publisher-tag-template" maxlength="500" placeholder="shorts, gaming, creator"></label></div><div class="publisher-brand-actions"><button type="button" class="text-button" id="publisher-brand-save">Save profile metadata</button><button type="button" class="secondary-button" id="publisher-brand-apply">Apply to selected clip</button></div></div>\n     <label>Video title<input id="publisher-title" maxlength="100" required placeholder="Give your Short a clear title"></label>
      <label>Description<textarea id="publisher-description" rows="4" maxlength="5000" placeholder="Add context, links or credits…"></textarea></label>
      <div class="publisher-form-row"><label>Visibility<select id="publisher-privacy"><option value="private">Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select></label><label>Schedule (optional)<input id="publisher-schedule" type="datetime-local"></label></div>
      <label>Tags <input id="publisher-tags" placeholder="shorts, topic, channel (comma separated)"></label>
@@ -25,9 +25,49 @@
   $("#youtube-connect").addEventListener("click",e=>{e.preventDefault();window.location.href="/api/youtube/connect";});
   $("#publisher-refresh").addEventListener("click",load);
   $("#publisher-clip").addEventListener("change",()=>{const item=state.eligible.find(x=>x.clipId===$("#publisher-clip").value);if(item){$("#publisher-title").value=item.title||"";$("#publisher-description").value=item.caption||"";}});
+  $("#publisher-brand-profile").addEventListener("change",loadBrandTemplateFields);
+  $("#publisher-brand-save").addEventListener("click",saveBrandTemplate);
+  $("#publisher-brand-apply").addEventListener("click",applyBrandTemplate);
   $("#publisher-form").addEventListener("submit",queue);
  }
- function setMessage(msg,error=false){const el=$("#publisher-message");el.textContent=msg;el.classList.toggle("error",error);}
+ 
+ function renderBrandProfileOptions(){
+  const select=$("#publisher-brand-profile"),current=select.value||state.activeProfileId;
+  select.innerHTML='<option value="">Choose Brand Profile…</option>'+state.profiles.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join("");
+  if(state.profiles.some(p=>p.id===current))select.value=current;
+ }
+ function selectedBrandProfile(){return state.profiles.find(p=>p.id===$("#publisher-brand-profile").value)||null;}
+ function loadBrandTemplateFields(){
+  const profile=selectedBrandProfile(),m=profile?.metadata||{};
+  $("#publisher-title-template").value=m.titleTemplate||"{clip_title} #Shorts";
+  $("#publisher-description-template").value=m.descriptionTemplate||"{clip_title}\n\n{hashtags}";
+  $("#publisher-hashtag-template").value=m.hashtags||"#shorts";
+  $("#publisher-tag-template").value=m.tags||"shorts";
+ }
+ async function saveBrandTemplate(){
+  const profile=selectedBrandProfile();if(!profile){setMessage("Choose a Brand Profile before saving metadata.",true);return;}
+  const button=$("#publisher-brand-save");button.disabled=true;button.textContent="Saving…";
+  try{
+   const metadata={titleTemplate:$("#publisher-title-template").value.trim(),descriptionTemplate:$("#publisher-description-template").value.trim(),hashtags:$("#publisher-hashtag-template").value.trim(),tags:$("#publisher-tag-template").value.trim()};
+   const response=await fetch("/api/workspace/brand-kit",{method:"PUT",headers:{"content-type":"application/json",accept:"application/json"},body:JSON.stringify({action:"metadata",profileId:profile.id,metadata})});
+   const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not save profile metadata.");
+   state.profiles=state.profiles.map(p=>p.id===profile.id?data.profile:p);setMessage("Metadata template saved to "+profile.name+".");
+  }catch(e){setMessage(e.message,true);}
+  finally{button.disabled=false;button.textContent="Save profile metadata";}
+ }
+ function applyBrandTemplate(){
+  const item=state.eligible.find(x=>x.clipId===$("#publisher-clip").value);
+  if(!item){setMessage("Choose an approved render first.",true);return;}
+  const replace=value=>String(value||"").replace(/\{clip_title\}/gi,item.title||"").replace(/\{source_title\}/gi,item.sourceTitle||"").replace(/\{channel\}/gi,state.connection?.channelTitle||"").replace(/\{hashtags\}/gi,$("#publisher-hashtag-template").value.trim());
+  const title=replace($("#publisher-title-template").value).replace(/\s+/g," ").trim().slice(0,100);
+  const description=replace($("#publisher-description-template").value).trim().slice(0,5000);
+  const tags=$("#publisher-tag-template").value.split(",").map(x=>x.trim()).filter(Boolean).slice(0,30);
+  if(title)$("#publisher-title").value=title;
+  $("#publisher-description").value=description||item.caption||"";
+  $("#publisher-tags").value=tags.join(", ");
+  setMessage("Brand metadata applied. Review the title, description and tags before queueing.");
+ }
+\n function setMessage(msg,error=false){const el=$("#publisher-message");el.textContent=msg;el.classList.toggle("error",error);}
  function render(){
   const c=state.connection;
   $("#youtube-channel-title").textContent=c?.connected?c.channelTitle:"YouTube channel not connected";
@@ -50,7 +90,7 @@
  async function load(){
   ensure();if(state.loading)return;state.loading=true;
   try{
-   const [pub,review]=await Promise.all([fetch("/api/youtube",{headers:{accept:"application/json"}}),fetch("/api/review",{headers:{accept:"application/json"}})]);
+   const [pub,review,brands]=await Promise.all([fetch("/api/youtube",{headers:{accept:"application/json"}}),fetch("/api/review",{headers:{accept:"application/json"}}),fetch("/api/workspace/brand-kit",{headers:{accept:"application/json"}})]);
    const p=await pub.json();if(!pub.ok||!p.ok)throw new Error(p.error||"Could not load publisher.");
    const r=await review.json();if(!review.ok||!r.ok)throw new Error(r.error||"Could not load approved renders.");
    state.connection=p.connection;state.jobs=p.jobs||[];state.eligible=(r.items||[]).filter(x=>x.decision==="approved");
