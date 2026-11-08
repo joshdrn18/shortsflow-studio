@@ -207,6 +207,23 @@ async function failJob(env, job, transcriptId, message) {
   await env.DB.batch(statements);
 }
 
+async function retryTransientJob(env, job, message) {
+  const text = String(message || "Temporary processing error.").slice(0, 1000);
+  const transient = /429|rate.?limit|5\\d\\d|timeout|timed out|network|fetch failed|overloaded|temporarily unavailable|internal error|connection reset|service unavailable/i.test(text);
+  const attempts = Number(job.attempts || 0);
+  if (!transient || attempts >= 2) return false;
+  const delaySeconds = Math.min(300, 30 * (2 ** attempts));
+  const now = new Date();
+  const availableAt = new Date(now.getTime() + delaySeconds * 1000).toISOString();
+  await env.DB.prepare(
+    `UPDATE processing_jobs
+     SET status='queued', attempts=attempts+1, available_at=?,
+         locked_until=NULL, locked_by=NULL, last_error=?, updated_at=?
+     WHERE id=? AND status='running'`
+  ).bind(availableAt, text, now.toISOString(), job.id).run();
+  return true;
+}
+
 async function reserveAiBudget(env, seconds) {
   const usageDate = new Date().toISOString().slice(0, 10);
   const neurons = (seconds / 60) * NEURONS_PER_AUDIO_MINUTE;
@@ -272,7 +289,10 @@ async function processNextJob(env) {
     try {
       await processClipDiscovery(env, job);
     } catch (error) {
-      await failJob(env, job, null, error?.message || "Clip discovery failed.");
+      const message = error?.message || "Clip discovery failed.";
+      if (!await retryTransientJob(env, job, message)) {
+        await failJob(env, job, null, message);
+      }
     }
     return;
   }
@@ -401,7 +421,10 @@ async function processNextJob(env) {
       await completeTranscript(env, job, payload, transcriptId);
     }
   } catch (error) {
-    await failJob(env, job, transcriptId, error?.message || "Unexpected analysis error.");
+    const message = error?.message || "Unexpected analysis error.";
+    if (!await retryTransientJob(env, job, message)) {
+      await failJob(env, job, transcriptId, message);
+    }
   }
 }
 
