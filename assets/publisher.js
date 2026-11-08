@@ -58,14 +58,21 @@
  function applyBrandTemplate(){
   const item=state.eligible.find(x=>x.clipId===$("#publisher-clip").value);
   if(!item){setMessage("Choose an approved render first.",true);return;}
-  const replace=value=>String(value||"").replace(/\{clip_title\}/gi,item.title||"").replace(/\{source_title\}/gi,item.sourceTitle||"").replace(/\{channel\}/gi,state.connection?.channelTitle||"").replace(/\{hashtags\}/gi,$("#publisher-hashtag-template").value.trim());
-  const title=replace($("#publisher-title-template").value).replace(/\s+/g," ").trim().slice(0,100);
+  const replace=value=>String(value||"").replace(/\\{clip_title\\}/gi,item.title||"").replace(/\\{source_title\\}/gi,item.sourceTitle||"").replace(/\\{channel\\}/gi,state.connection?.channelTitle||"").replace(/\\{hashtags\\}/gi,$("#publisher-hashtag-template").value.trim());
+  const title=replace($("#publisher-title-template").value).replace(/\\s+/g," ").trim().slice(0,100);
   const description=replace($("#publisher-description-template").value).trim().slice(0,5000);
-  const tags=$("#publisher-tag-template").value.split(",").map(x=>x.trim()).filter(Boolean).slice(0,30);
-  if(title)$("#publisher-title").value=title;
+  const tagsText=replace($("#publisher-tag-template").value);
+  const tags=[],seen=new Set();let tagChars=0;
+  for(const raw of tagsText.split(",")){
+   const tag=raw.trim().replace(/\\s+/g," ");if(!tag)continue;
+   const key=tag.toLocaleLowerCase();if(seen.has(key))continue;
+   const cost=tag.length+(tags.length?1:0);if(tags.length>=30||tagChars+cost>500)continue;
+   seen.add(key);tags.push(tag);tagChars+=cost;
+  }
+  $("#publisher-title").value=title||item.title||"";
   $("#publisher-description").value=description||item.caption||"";
   $("#publisher-tags").value=tags.join(", ");
-  setMessage("Brand metadata applied. Review the title, description and tags before queueing.");
+  setMessage("Brand metadata applied. Placeholders were resolved and duplicate/over-limit tags were removed. Review everything before queueing.");
  }
 
  function setMessage(msg,error=false){const el=$("#publisher-message");el.textContent=msg;el.classList.toggle("error",error);}
