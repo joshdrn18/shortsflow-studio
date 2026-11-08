@@ -460,6 +460,22 @@ async function processNextJob(env) {
   }
 }
 
+async function loadWorkspaceWinnerPatterns(env, workspaceId) {
+  const result = await env.DB.prepare(`
+    SELECT c.title,c.hook,p.updated_at AS published_at,
+      (SELECT m.views FROM youtube_video_metric_snapshots m WHERE m.publishing_job_id=p.id ORDER BY m.fetched_at DESC LIMIT 1) AS views
+    FROM publishing_jobs p JOIN clips c ON c.id=p.clip_id
+    WHERE c.workspace_id=? AND p.platform='youtube' AND p.status='published'
+      AND p.platform_video_id IS NOT NULL AND p.updated_at >= datetime('now','-90 days')
+    ORDER BY p.updated_at DESC LIMIT 100
+  `).bind(workspaceId).all();
+  const measured=(result.results||[]).filter(row=>row.views!==null&&row.views!==undefined&&row.published_at);
+  if(measured.length<3)return {patterns:[],confidence:0,sampleSize:measured.length};
+  const scored=measured.map(row=>({...row,velocity:Number(row.views||0)/Math.max(1,(Date.now()-new Date(row.published_at).getTime())/86400000)})).sort((a,b)=>b.velocity-a.velocity);
+  const winners=scored.slice(0,Math.max(1,Math.ceil(scored.length*0.3))).slice(0,5);
+  return {patterns:winners.map(row=>({title:String(row.title||"").slice(0,120),hook:String(row.hook||"").slice(0,180),viewsPerDay:Math.round(row.velocity)})),confidence:Math.min(1,measured.length/8),sampleSize:measured.length};
+}
+
 async function processClipDiscovery(env, job) {
   const payload = parsePayload(job.payload_json);
   const transcriptId = payload.transcriptId;
@@ -492,7 +508,11 @@ async function processClipDiscovery(env, job) {
   }
   const source = await env.DB.prepare("SELECT title FROM source_videos WHERE id = ? AND workspace_id = ?").bind(job.source_video_id, job.workspace_id).first();
   const sourceTitle = String(source?.title || "");
-  const system = "You are an expert short-form video editor and social copywriter. Identify self-contained, high-retention moments from timestamped speech. Never invent speech, events, character actions, or timestamps. Metadata quality is mandatory: titles must be specific, descriptive, natural, and normally 4–10 words; never use a one-word reaction such as Wow, Whoa, Yes, or Okay as a title. Captions must be a complete, engaging 1–2 sentence description of the actual moment, not a repeat of the title or a transcript fragment. Hashtags must be 3–6 relevant topical tags grounded in the source and transcript; never output #topic or generic filler. Return valid JSON only.";
+  const winnerLearning = await loadWorkspaceWinnerPatterns(env, job.workspace_id);
+  const winnerGuidance = winnerLearning.patterns.length
+    ? " Workspace performance learning from this channel's published Shorts (a light creative hint, not a guarantee): " + winnerLearning.patterns.map((item,index)=>"#"+(index+1)+" title="+item.title+"; hook="+item.hook+"; approx views/day="+item.viewsPerDay).join(" | ") + ". Look for similarly clear hooks and payoff structures only when they genuinely fit this source. Never copy titles or force unrelated topics."
+    : "";
+  const system = "You are an expert short-form video editor and social copywriter. Identify self-contained, high-retention moments from timestamped speech. Never invent speech, events, character actions, or timestamps. Metadata quality is mandatory: titles must be specific, descriptive, natural, and normally 4–10 words; never use a one-word reaction such as Wow, Whoa, Yes, or Okay as a title. Captions must be a complete, engaging 1–2 sentence description of the actual moment, not a repeat of the title or a transcript fragment. Hashtags must be 3–6 relevant topical tags grounded in the source and transcript; never output #topic or generic filler. Return valid JSON only." + winnerGuidance;
   // Split long transcripts into overlapping windows so one model response cannot crowd out
   // every candidate. Each window independently searches for 1–3 distinct moments.
   const WINDOW_SECONDS = 150;
@@ -649,9 +669,22 @@ async function processClipDiscovery(env, job) {
     );
     // Keep the model's score as the persisted AI score, but rank with a blended
     // score so transcript substance and a self-contained ending influence selection.
-    const rankScore = score * 0.60 + qualityScore * 0.40;
+    const candidateTokens = new Set([title,hook,reason].join(" ").toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu," ").split(/\\s+/).filter(token=>token.length>=3));
+    let winnerSimilarity = 0;
+    if (winnerLearning.confidence > 0 && candidateTokens.size >= 3) {
+      for (const winner of winnerLearning.patterns) {
+        const winnerTokens = new Set([winner.title,winner.hook].join(" ").toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu," ").split(/\\s+/).filter(token=>token.length>=3));
+        if (winnerTokens.size < 3) continue;
+        let overlap = 0;
+        for (const token of candidateTokens) if (winnerTokens.has(token)) overlap++;
+        winnerSimilarity = Math.max(winnerSimilarity,overlap/Math.min(candidateTokens.size,winnerTokens.size));
+      }
+    }
+    const learningBonus = Math.round(winnerSimilarity * 5 * winnerLearning.confidence * 10) / 10;
+    // Historical channel winners guide ranking lightly; editorial quality remains dominant.
+    const rankScore = score * 0.60 + qualityScore * 0.40 + learningBonus;
     return { candidate, score, qualityScore: Math.round(qualityScore),
-      transcriptQuality: Math.round(transcriptQuality * 100), rankScore: Math.round(rankScore) };
+      transcriptQuality: Math.round(transcriptQuality * 100), learningBonus, rankScore: Math.round(rankScore) };
   }).sort((a,b) => b.rankScore - a.rankScore || b.score - a.score);
 
   for (const item of ranked) {
