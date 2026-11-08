@@ -34,7 +34,7 @@
           <div><strong id="system-label">Checking system</strong><small id="system-detail">Connecting to API…</small></div>
         </div>
         <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span>Settings</button>
-        <div class="profile-row"><div class="avatar">S</div><div><strong>Studio workspace</strong><small>Personal workspace</small></div><span class="profile-menu">•••</span></div>
+        <div class="workspace-menu-wrap"><button class="profile-row" id="workspace-menu-trigger" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="workspace-menu"><span class="avatar">S</span><span class="profile-copy"><strong>Studio workspace</strong><small>Personal workspace</small></span><span class="profile-menu" aria-hidden="true">•••</span></button><div class="workspace-menu hidden" id="workspace-menu" role="menu"><button type="button" role="menuitem" data-workspace-action="settings">Workspace settings</button><button type="button" role="menuitem" data-workspace-action="refresh">Refresh workspace</button><div class="workspace-menu-divider"></div><button type="button" role="menuitem" class="workspace-menu-danger" data-workspace-action="logout">Sign out</button></div></div>
       </div>
     </aside>
 
