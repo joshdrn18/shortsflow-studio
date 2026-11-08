@@ -35,7 +35,7 @@
   const scale=Math.max(.82,Math.min(1.65,(Number(c.fontSize)||28)/28));
   let size=Math.round(49*scale),maxWidth=w*.86,lines=[];
   const buildLines=fontSize=>{
-   ctx.font=\`900 \${fontSize}px Manrope,Arial,sans-serif\`;
+   ctx.font=`900 ${fontSize}px Manrope,Arial,sans-serif`;
    const out=[];let line=[];
    for(const token of current){
     const test=[...line,token],width=ctx.measureText(test.map(x=>x.word).join(" ")).width;
@@ -57,7 +57,7 @@
   const centerY=c.position==="top"?frame.y+frame.h*.2:frame.y+frame.h*.8;
   const minY=frame.y+lh*.65,maxY=frame.y+frame.h-lh*.65;
   const top=Math.max(minY,Math.min(maxY-totalH,centerY-totalH/2));
-  ctx.save();ctx.font=\`900 \${size}px Manrope,Arial,sans-serif\`;ctx.textAlign="left";ctx.textBaseline="middle";
+  ctx.save();ctx.font=`900 ${size}px Manrope,Arial,sans-serif`;ctx.textAlign="left";ctx.textBaseline="middle";
   lines.forEach((items,i)=>{
    const widths=items.map(token=>ctx.measureText(token.word).width);
    const space=ctx.measureText(" ").width;
