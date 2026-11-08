@@ -23,7 +23,10 @@ async function decryptRefreshToken(value, secret) {
   return new TextDecoder().decode(plain);
 }
 async function processYoutubeJob(env) {
-  if (!env.DB || !env.SOURCE_MEDIA || !env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET || !env.YOUTUBE_TOKEN_ENCRYPTION_KEY) return;
+  // Pages Functions use MEDIA; the standalone Worker may use SOURCE_MEDIA.
+  // Accept either binding so both deployments can point at the same private bucket.
+  const mediaBucket = env.SOURCE_MEDIA || env.MEDIA;
+  if (!env.DB || !mediaBucket || !env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET || !env.YOUTUBE_TOKEN_ENCRYPTION_KEY) return;
   const now = new Date().toISOString();
   const workerId = crypto.randomUUID();
   const job = await env.DB.prepare(`
@@ -48,7 +51,7 @@ async function processYoutubeJob(env) {
         AND a.metadata_version=? AND a.version=(SELECT MAX(version) FROM clip_assets WHERE clip_id=c.id AND asset_type='render')
     `).bind(job.render_asset_id,job.clip_id,job.metadata_version).first();
     if (!approved) throw new Error("Approval no longer matches the latest render. Review the current clip again.");
-    const object = await env.SOURCE_MEDIA.get(approved.storage_key);
+    const object = await mediaBucket.get(approved.storage_key);
     if (!object) throw new Error("Approved render file is missing from private R2 storage.");
     const size = Number(approved.size_bytes || object.size || 0);
     if (!size || size > 90 * 1024 * 1024) throw new Error("Render file is empty or exceeds the 90 MB publishing limit.");
