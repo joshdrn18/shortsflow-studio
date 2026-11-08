@@ -2,6 +2,7 @@
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
   const time = value => { const seconds=Math.max(0,Math.floor(Number(value)||0)); return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0"); };
+  const clock = value => { const seconds=Math.max(0,Number(value)||0),whole=Math.floor(seconds);return Math.floor(whole/60)+":"+String(whole%60).padStart(2,"0")+"."+Math.floor((seconds-whole)*10); };
   let activeClip=null, clipStart=0, clipEnd=0, busy=false;
   const selectedClipIds = new Set();
 
@@ -21,14 +22,22 @@
     $("#clip-start").addEventListener("change",updateTrim);
     $("#clip-end").addEventListener("change",updateTrim);
     $("#clip-preview-video").addEventListener("timeupdate",()=>{
-      const video=$("#clip-preview-video");if(activeClip&&video.currentTime>=clipEnd){video.pause();video.currentTime=clipEnd;}
+      const video=$("#clip-preview-video");if(!activeClip)return;
+      if(video.currentTime>=clipEnd){video.pause();video.currentTime=clipEnd;}
+      const elapsed=Math.max(0,Math.min(clipEnd-clipStart,video.currentTime-clipStart));
+      $("#clip-preview-current").textContent=clock(elapsed);
+      $("#clip-preview-seek").value=elapsed.toFixed(1);
+    });
+    $("#clip-preview-seek").addEventListener("input",event=>{
+      if(!activeClip)return;const video=$("#clip-preview-video"),elapsed=Math.max(0,Math.min(clipEnd-clipStart,Number(event.target.value)||0));
+      video.currentTime=clipStart+elapsed;$("#clip-preview-current").textContent=clock(elapsed);
     });
     $("#clip-preview-video").addEventListener("loadedmetadata",()=>{
       if(!activeClip)return;
       const duration=$("#clip-preview-video").duration;
       clipStart=Math.max(0,Math.min(clipStart,Math.max(0,duration-0.1)));
       clipEnd=Math.min(clipEnd,duration);if(clipEnd<=clipStart)clipEnd=Math.min(duration,clipStart+1);
-      syncTrimInputs();$("#clip-preview-seek").max=(clipEnd-clipStart).toFixed(1);$("#clip-preview-seek").value="0";$("#clip-preview-current").textContent=time(clipStart);$("#clip-preview-duration").textContent=time(clipEnd);$("#clip-preview-message").textContent="Clip preview · "+time(clipStart)+" to "+time(clipEnd)+" · "+(clipEnd-clipStart).toFixed(1)+" seconds. The source file remains longer.";
+      syncTrimInputs();$("#clip-preview-seek").max=(clipEnd-clipStart).toFixed(1);$("#clip-preview-seek").value="0";$("#clip-preview-current").textContent=clock(0);$("#clip-preview-duration").textContent=clock(clipEnd-clipStart);$("#clip-preview-message").textContent="Clip preview · source "+time(clipStart)+" to "+time(clipEnd)+" · "+(clipEnd-clipStart).toFixed(1)+" seconds. Timeline shows time within this clip.";
     });
     $("#clip-preview-video").addEventListener("error",()=>{$("#clip-preview-message").textContent="Could not play this source. Check browser codec support.";});
   }
@@ -42,12 +51,12 @@
     if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start||end>duration||end-start<1||end-start>180){
       $("#clip-preview-message").textContent="Cut must be 1–180 seconds and stay within the source video.";syncTrimInputs();return;
     }
-    clipStart=start;clipEnd=end;window.__shortsflowClipStart=clipStart;window.__shortsflowClipEnd=clipEnd;const video=$("#clip-preview-video");video.pause();video.currentTime=clipStart;syncTrimInputs();$("#clip-preview-seek").max=(clipEnd-clipStart).toFixed(1);$("#clip-preview-seek").value="0";$("#clip-preview-current").textContent=time(clipStart);$("#clip-preview-duration").textContent=time(clipEnd);
+    clipStart=start;clipEnd=end;window.__shortsflowClipStart=clipStart;window.__shortsflowClipEnd=clipEnd;const video=$("#clip-preview-video");video.pause();video.currentTime=clipStart;syncTrimInputs();$("#clip-preview-seek").max=(clipEnd-clipStart).toFixed(1);$("#clip-preview-seek").value="0";$("#clip-preview-current").textContent=clock(0);$("#clip-preview-duration").textContent=clock(clipEnd-clipStart);
     $("#clip-preview-message").textContent="Cut adjusted · "+(clipEnd-clipStart).toFixed(1)+" sec · unsaved";
   }
   function playCut(){
     if(!activeClip)return;const video=$("#clip-preview-video");video.currentTime=clipStart;
-    const promise=video.play();if(promise?.catch)promise.catch(()=>{$("#clip-preview-message").textContent="Press play on the video to start preview.";});
+    video.playbackRate=1;video.currentTime=clipStart;const promise=video.play();if(promise?.catch)promise.catch(()=>{$("#clip-preview-message").textContent="Press play on the video to start preview.";});
   }
   function closePreview(){
     const dialog=$("#clip-preview-dialog"),video=$("#clip-preview-video");video.pause();video.removeAttribute("src");video.load();activeClip=null;window.__shortsflowActiveClip=null;
@@ -61,7 +70,7 @@
     $("#clip-edit-title").value=clip.title||"";$("#clip-edit-caption").value=clip.caption||"";
     $("#clip-edit-hashtags").value=clip.hashtags||"";$("#clip-edit-language").value=clip.language||"";
     $("#clip-preview-message").textContent="Loading private source video…";$("#clip-save-btn").disabled=false;
-    syncTrimInputs();$("#clip-preview-seek").max=(clipEnd-clipStart).toFixed(1);$("#clip-preview-seek").value="0";$("#clip-preview-current").textContent=time(clipStart);$("#clip-preview-duration").textContent=time(clipEnd);video.src="/api/sources/"+encodeURIComponent(clip.sourceId);
+    syncTrimInputs();$("#clip-preview-seek").max=(clipEnd-clipStart).toFixed(1);$("#clip-preview-seek").value="0";$("#clip-preview-current").textContent=clock(0);$("#clip-preview-duration").textContent=clock(clipEnd-clipStart);video.playbackRate=1;video.defaultPlaybackRate=1;video.src="/api/sources/"+encodeURIComponent(clip.sourceId);
     const dialog=$("#clip-preview-dialog");if(typeof dialog.showModal==="function")dialog.showModal();else dialog.setAttribute("open","");
     video.load();video.addEventListener("loadedmetadata",function seekStart(){video.removeEventListener("loadedmetadata",seekStart);if(activeClip)video.currentTime=clipStart;},{once:true});
   }
