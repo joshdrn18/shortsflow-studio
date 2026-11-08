@@ -43,10 +43,10 @@ async function processYoutubeJob(env) {
         r.id AS review_id
       FROM clip_assets a JOIN clips c ON c.id=a.clip_id
       JOIN clip_metadata m ON m.clip_id=c.id AND m.version=(SELECT MAX(version) FROM clip_metadata WHERE clip_id=c.id)
-      JOIN clip_reviews r ON r.id=(SELECT r2.id FROM clip_reviews r2 WHERE r2.clip_id=c.id AND r2.render_asset_id=a.id AND r2.metadata_version=m.version ORDER BY r2.reviewed_at DESC LIMIT 1) AND r.decision='approved'
+      JOIN clip_reviews r ON r.id=(SELECT r2.id FROM clip_reviews r2 WHERE r2.clip_id=c.id AND r2.render_asset_id=a.id AND r2.metadata_version=m.version ORDER BY r2.reviewed_at DESC,r2.id DESC LIMIT 1) AND r.decision='approved'
       WHERE a.id=? AND a.clip_id=? AND a.asset_type='render' AND a.metadata_version=m.version
-        AND a.metadata_version=? AND r.id=? AND a.version=(SELECT MAX(version) FROM clip_assets WHERE clip_id=c.id AND asset_type='render')
-    `).bind(job.render_asset_id,job.clip_id,job.metadata_version,job.review_id).first();
+        AND a.metadata_version=? AND a.version=(SELECT MAX(version) FROM clip_assets WHERE clip_id=c.id AND asset_type='render')
+    `).bind(job.render_asset_id,job.clip_id,job.metadata_version).first();
     if (!approved) throw new Error("Approval no longer matches the latest render. Review the current clip again.");
     const object = await env.SOURCE_MEDIA.get(approved.storage_key);
     if (!object) throw new Error("Approved render file is missing from private R2 storage.");
