@@ -209,7 +209,7 @@ async function failJob(env, job, transcriptId, message) {
 
 async function retryTransientJob(env, job, message) {
   const text = String(message || "Temporary processing error.").slice(0, 1000);
-  const transient = /429|rate.?limit|5\\d\\d|timeout|timed out|network|fetch failed|overloaded|temporarily unavailable|internal error|connection reset|service unavailable/i.test(text);
+  const transient = /429|rate.?limit|5\d\d|timeout|timed out|network|fetch failed|overloaded|temporarily unavailable|internal error|connection reset|service unavailable/i.test(text);
   const attempts = Number(job.attempts || 0);
   if (!transient || attempts >= 2) return false;
   const delaySeconds = Math.min(300, 30 * (2 ** attempts));
@@ -267,15 +267,20 @@ async function ensureTranscript(env, job, payload) {
   const version = Number(latest?.version || 0) + 1;
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  await env.DB.prepare(
-    `INSERT INTO source_transcripts
-       (id, workspace_id, source_video_id, version, status, model, transcript_text, segments_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'processing', ?, '', '[]', ?, ?)`
-  ).bind(id, job.workspace_id, job.source_video_id, version, MODEL, now, now).run();
   payload.transcriptId = id;
   payload.chunkIndex = 0;
-  await env.DB.prepare("UPDATE processing_jobs SET payload_json = ? WHERE id = ?")
-    .bind(JSON.stringify(payload), job.id).run();
+  // Persist the transcript row and its job pointer atomically. If the Worker
+  // stops between these writes, a retry could otherwise create a second
+  // transcript version for the same analysis job.
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO source_transcripts
+         (id, workspace_id, source_video_id, version, status, model, transcript_text, segments_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'processing', ?, '', '[]', ?, ?)`
+    ).bind(id, job.workspace_id, job.source_video_id, version, MODEL, now, now),
+    env.DB.prepare("UPDATE processing_jobs SET payload_json = ? WHERE id = ? AND status = 'running'")
+      .bind(JSON.stringify(payload), job.id)
+  ]);
   return { id, transcript_text: "", segments_json: "[]" };
 }
 
