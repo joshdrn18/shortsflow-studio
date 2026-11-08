@@ -644,7 +644,7 @@ async function processClipDiscovery(env, job) {
       titleQuality * 0.10 +
       captionQuality * 0.10 +
       payoffQuality * 0.15 +
-      transcriptQuality * 0.20 +
+      transcriptQuality * 0.15 +
       retentionQuality * 0.10
     );
     // Keep the model's score as the persisted AI score, but rank with a blended
