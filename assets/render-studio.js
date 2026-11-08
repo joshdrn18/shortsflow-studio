@@ -105,7 +105,7 @@
    const blob=new Blob(chunks,{type:"video/webm"});if(blob.size<1024)throw new Error("Render output is empty. Check source playback and retry.");if(blob.size>90*1024*1024)throw new Error("Render exceeds the 90 MB limit. Try a shorter clip.");
    msg.textContent="Uploading render to private R2 storage…";
    const result=await new Promise((resolve,reject)=>{
-    const xhr=new XMLHttpRequest();xhr.open("POST","/api/clips/"+encodeURIComponent(clip.id)+"/render");xhr.withCredentials=true;xhr.timeout=180000;
+    const xhr=new XMLHttpRequest();xhr.open("POST","/api/clips/"+encodeURIComponent(clip.id)+"/render");xhr.withCredentials=true;xhr.timeout=300000;
     xhr.setRequestHeader("Content-Type","video/webm");xhr.setRequestHeader("X-Metadata-Version",String(mv));
     xhr.upload.addEventListener("progress",event=>{
      if(event.lengthComputable){const percent=Math.round(event.loaded/event.total*100),sent=(event.loaded/1048576).toFixed(1),total=(event.total/1048576).toFixed(1);msg.textContent="Uploading to private R2 storage… "+percent+"% · "+sent+" / "+total+" MB";}
@@ -117,11 +117,14 @@
      resolve(data);
     });
     xhr.addEventListener("error",()=>reject(new Error("Network error while uploading to R2. Check connection and retry.")));
-    xhr.addEventListener("timeout",()=>reject(new Error("R2 upload timed out after 3 minutes. No saved asset was confirmed; retry the render.")));
+    xhr.addEventListener("timeout",()=>reject(new Error("R2 upload timed out after 5 minutes. The server did not confirm a saved asset; refresh the clip before retrying.")));
     xhr.addEventListener("abort",()=>reject(new Error("R2 upload was cancelled.")));
     xhr.send(blob);msg.textContent="Connecting to private R2 storage…";
    });
-   msg.innerHTML='Render saved · WebM · '+(result.asset.sizeBytes/1048576).toFixed(1)+' MB · <a href="'+result.asset.url+'" target="_blank" rel="noopener">Open rendered video ↗</a>';btn.textContent="Render again";
+   msg.replaceChildren();
+   msg.append(document.createTextNode("Render saved · WebM · "+(result.asset.sizeBytes/1048576).toFixed(1)+" MB · "));
+   const link=document.createElement("a");link.href=result.asset.url;link.target="_blank";link.rel="noopener";link.textContent="Open rendered video ↗";msg.append(link);
+   btn.textContent="Render again";
   }catch(e){msg.textContent=e.message||"Render failed. Retry.";btn.textContent="Retry render";}
   finally{stopped=true;cancelAnimationFrame(frame);if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(sourceStream)sourceStream.getTracks().forEach(t=>t.stop());busy=false;btn.disabled=false;}
  }
