@@ -100,7 +100,7 @@ export async function onRequestPatch({ request, env }) {
 
 
 export async function onRequestDelete({ request, env }) {
-  if (!env.DB) return json({ ok: false, error: "Database is not configured." }, 503);
+  if (!env.DB || !env.MEDIA) return json({ ok: false, error: "Database or private storage is not configured. No clips were deleted." }, 503);
   const user = await getSessionUser(request, env);
   if (!user) return json({ ok: false, error: "Authentication required." }, 401);
   if (!user.workspace?.id) return json({ ok: false, error: "No workspace is assigned to this account." }, 403);
@@ -119,13 +119,20 @@ export async function onRequestDelete({ request, env }) {
     if (!ids.length) return json({ ok: false, error: "No selected clips were found in this workspace." }, 404);
 
     const ownedPlaceholders = ids.map(() => "?").join(",");
+    const activePublishing = await env.DB.prepare(
+      `SELECT id FROM publishing_jobs WHERE clip_id IN (${ownedPlaceholders}) AND status IN ('uploading','processing') LIMIT 1`
+    ).bind(...ids).first();
+    if (activePublishing) {
+      return json({ ok: false, error: "At least one selected clip is currently being published. Wait for publishing to finish before deleting it." }, 409);
+    }
+
     const assets = await env.DB.prepare(
       `SELECT storage_key FROM clip_assets WHERE clip_id IN (${ownedPlaceholders})`
     ).bind(...ids).all();
     const keys = [...new Set((assets.results || []).map(row => row.storage_key).filter(Boolean))];
 
     // Remove private render assets before deleting their database references.
-    if (keys.length && env.MEDIA) {
+    if (keys.length) {
       try { await env.MEDIA.delete(keys); }
       catch (error) {
         console.error("Clip asset cleanup failed", error);
