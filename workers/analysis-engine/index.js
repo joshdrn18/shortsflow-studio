@@ -22,6 +22,22 @@ async function decryptRefreshToken(value, secret) {
   const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: decodeBase64(ivText) }, key, decodeBase64(cipherText));
   return new TextDecoder().decode(plain);
 }
+async function restoreClipAfterYoutubeFailure(env,clipId,now){
+ await env.DB.prepare(`UPDATE clips SET status=CASE WHEN EXISTS(
+  SELECT 1 FROM clip_metadata m
+  JOIN clip_assets a ON a.clip_id=m.clip_id AND a.asset_type='render'
+   AND a.version=(SELECT MAX(x.version) FROM clip_assets x WHERE x.clip_id=m.clip_id AND x.asset_type='render')
+   AND a.metadata_version=m.version
+  JOIN clip_reviews r ON r.id=(SELECT x.id FROM clip_reviews x WHERE x.clip_id=m.clip_id
+   AND x.render_asset_id=a.id AND x.metadata_version=m.version ORDER BY x.reviewed_at DESC,x.id DESC LIMIT 1)
+   AND r.decision='approved'
+  WHERE m.clip_id=clips.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=clips.id)
+ ) THEN 'approved' ELSE 'editing' END,updated_at=?
+ WHERE id=? AND status='publishing'
+ AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.clip_id=clips.id AND p.platform='youtube'
+  AND p.status IN ('queued','uploading','processing','published'))`).bind(now,clipId).run();
+}
+
 async function processYoutubeJob(env) {
   // Pages Functions use MEDIA; the standalone Worker may use SOURCE_MEDIA.
   // Accept either binding so both deployments can point at the same private bucket.
@@ -31,13 +47,17 @@ async function processYoutubeJob(env) {
   // Do not leave uploads stuck forever after a Worker termination. Avoid an
   // automatic retry because YouTube may have accepted the upload already.
   const staleBefore = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-  await env.DB.prepare(`
+  const stale = await env.DB.prepare(`
     UPDATE publishing_jobs
     SET status='failed',
         last_error='Upload worker stopped before confirming the result. Check YouTube Studio before retrying to avoid duplicate uploads.',
         updated_at=?
     WHERE platform='youtube' AND status='uploading' AND updated_at<?
-  `).bind(now, staleBefore).run();
+    RETURNING clip_id
+  `).bind(now, staleBefore).all();
+  for (const row of (stale.results || [])) {
+    await restoreClipAfterYoutubeFailure(env,row.clip_id,now);
+  }
   const workerId = crypto.randomUUID();
   const job = await env.DB.prepare(`
     UPDATE publishing_jobs SET status='uploading',attempts=attempts+1,updated_at=?
@@ -97,7 +117,18 @@ async function processYoutubeJob(env) {
     ]);
   } catch (error) {
     const message=String(error?.message || "YouTube upload failed.").slice(0,1000);
-    await env.DB.prepare("UPDATE publishing_jobs SET status='failed',last_error=?,updated_at=? WHERE id=? AND status='uploading'").bind(message,new Date().toISOString(),job.id).run();
+    const failedAt=new Date().toISOString();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE publishing_jobs SET status='failed',last_error=?,updated_at=? WHERE id=? AND status='uploading'").bind(message,failedAt,job.id),
+      env.DB.prepare(`UPDATE clips SET status=CASE WHEN EXISTS(
+        SELECT 1 FROM clip_metadata m JOIN clip_assets a ON a.clip_id=m.clip_id AND a.asset_type='render'
+         AND a.version=(SELECT MAX(x.version) FROM clip_assets x WHERE x.clip_id=m.clip_id AND x.asset_type='render') AND a.metadata_version=m.version
+        JOIN clip_reviews r ON r.id=(SELECT x.id FROM clip_reviews x WHERE x.clip_id=m.clip_id AND x.render_asset_id=a.id AND x.metadata_version=m.version ORDER BY x.reviewed_at DESC,x.id DESC LIMIT 1) AND r.decision='approved'
+        WHERE m.clip_id=clips.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=clips.id)
+       ) THEN 'approved' ELSE 'editing' END,updated_at=?
+       WHERE id=? AND status='publishing'
+       AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.clip_id=clips.id AND p.platform='youtube' AND p.status IN ('queued','uploading','processing','published'))`).bind(failedAt,job.clip_id)
+    ]);
     console.error("youtube_upload_failed",job.id,message);
   }
 }
