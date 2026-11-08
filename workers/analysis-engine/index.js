@@ -574,10 +574,17 @@ async function processClipDiscovery(env, job) {
     const normalizedHook = hook.toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu, " ").replace(/\\s+/g, " ").trim();
     const normalizedTitle = title.toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu, " ").replace(/\\s+/g, " ").trim();
     const payoffPattern = /\\b(reveal|reveals|revealed|secret|surprise|unexpected|finally|turns out|plot twist|the truth|lesson|mistake|because|until|ternyata|akhirnya|rahasia|kejutan|faktanya|justru|malah|alasannya|kesalahan|pelajaran|solusinya)\\b/i;
-    const hookQuality = !hook ? 0 : Math.min(1, hook.length / 55) * 0.55 +
+    const hookWords = hook.split(/\\s+/).filter(Boolean);
+    const curiosityPattern = /\\b(why|how|what|never|secret|truth|mistake|nobody|everyone|until|before|after|instead|because|impossible|hidden|actually|turns out|ternyata|kenapa|mengapa|rahasia|fakta|kesalahan|ternyata|akhirnya|justru|malah|bagaimana)\\b/i;
+    const specificityPattern = /\\b\\d+\\b|\\b(first|last|only|exactly|every|one|dua|tiga|pertama|terakhir|satu)\\b/i;
+    const hookLengthQuality = hookWords.length >= 5 && hookWords.length <= 14 ? 1 :
+      hookWords.length >= 3 && hookWords.length <= 18 ? 0.7 : 0.35;
+    const hookQuality = !hook ? 0 : Math.min(1, hook.length / 65) * 0.25 +
+      hookLengthQuality * 0.25 +
       (/[?!:]/.test(hook) ? 0.15 : 0) +
-      (hook.split(/\\s+/).filter(Boolean).length >= 5 ? 0.2 : 0) +
-      (normalizedHook && normalizedHook !== normalizedTitle ? 0.1 : 0);
+      (curiosityPattern.test(hook) ? 0.2 : 0) +
+      (specificityPattern.test(hook) ? 0.1 : 0) +
+      (normalizedHook && normalizedHook !== normalizedTitle ? 0.05 : 0);
     const contextQuality = !reason ? 0 : Math.min(1, reason.length / 110) * 0.7 +
       (/[.!?]/.test(reason) ? 0.15 : 0) +
       (payoffPattern.test(reason) ? 0.15 : 0);
@@ -592,6 +599,7 @@ async function processClipDiscovery(env, job) {
     // look attractive in metadata but contain too little speech, excessive
     // repetition, or an abrupt ending with no complete thought.
     let transcriptQuality = 0.5;
+    let retentionQuality = 0.5;
     const rawStart = Number(candidate.startSeconds ?? candidate.start_seconds);
     const rawEnd = Number(candidate.endSeconds ?? candidate.end_seconds);
     if (Number.isFinite(rawStart) && Number.isFinite(rawEnd) && rawEnd > rawStart) {
@@ -613,14 +621,22 @@ async function processClipDiscovery(env, job) {
       const repetitionQuality = uniqueRatio >= 0.48 ? 1 : uniqueRatio >= 0.32 ? 0.65 : 0.3;
       const firstWords = spokenWords.slice(0, 12).map(word => word.word).join(" ");
       const lastWords = spokenWords.slice(-12).map(word => word.word).join(" ");
-      const hasOpeningSignal = /[?!:]|\\b(why|how|what|never|because|secret|watch|look|imagine|ternyata|kenapa|bagaimana|mengapa|rahasia|lihat|bayangkan)\\b/i.test(firstWords);
+      const openingWords = spokenWords.filter(word => Number(word.start) < absoluteStart + 3);
+      const openingRate = openingWords.length / 3;
+      const hasOpeningSignal = /[?!:]|\\b(why|how|what|never|because|secret|watch|look|imagine|wait|but|suddenly|ternyata|kenapa|bagaimana|mengapa|rahasia|lihat|bayangkan|tiba-tiba)\\b/i.test(firstWords);
       const hasClosingSignal = /[.!?…]["')\\]]?\\s*$/.test(lastWords) ||
-        /\\b(so|therefore|that's why|in the end|finally|turns out|jadi|makanya|akhirnya|ternyata|kesimpulannya)\\b/i.test(lastWords);
+        /\\b(so|therefore|that's why|in the end|finally|turns out|which means|jadi|makanya|akhirnya|ternyata|kesimpulannya)\\b/i.test(lastWords);
       const openingQuality = hasOpeningSignal ? 1 : 0.55;
       const closingQuality = hasClosingSignal ? 1 : 0.4;
       const lengthQuality = wordCount >= 28 ? 1 : wordCount >= 18 ? 0.7 : 0.3;
-      transcriptQuality = densityQuality * 0.25 + repetitionQuality * 0.20 +
-        openingQuality * 0.20 + closingQuality * 0.20 + lengthQuality * 0.15;
+      const openingPaceQuality = openingRate >= 1.0 && openingRate <= 5 ? 1 :
+        openingRate >= 0.5 && openingRate <= 6 ? 0.65 : 0.3;
+      const completionQuality = hasClosingSignal ? 1 : 0.4;
+      retentionQuality = openingPaceQuality * 0.35 + densityQuality * 0.25 +
+        repetitionQuality * 0.15 + completionQuality * 0.25;
+      transcriptQuality = densityQuality * 0.20 + repetitionQuality * 0.15 +
+        openingQuality * 0.20 + closingQuality * 0.20 + lengthQuality * 0.10 +
+        openingPaceQuality * 0.15;
     }
     const qualityScore = 100 * (
       hookQuality * 0.20 +
@@ -628,7 +644,8 @@ async function processClipDiscovery(env, job) {
       titleQuality * 0.10 +
       captionQuality * 0.10 +
       payoffQuality * 0.15 +
-      transcriptQuality * 0.25
+      transcriptQuality * 0.20 +
+      retentionQuality * 0.10
     );
     // Keep the model's score as the persisted AI score, but rank with a blended
     // score so transcript substance and a self-contained ending influence selection.
