@@ -461,6 +461,7 @@ async function processNextJob(env) {
 }
 
 async function loadWorkspaceWinnerPatterns(env, workspaceId) {
+  try {
   const result = await env.DB.prepare(`
     SELECT c.title,c.hook,p.updated_at AS published_at,
       (SELECT m.views FROM youtube_video_metric_snapshots m WHERE m.publishing_job_id=p.id ORDER BY m.fetched_at DESC LIMIT 1) AS views
@@ -474,6 +475,11 @@ async function loadWorkspaceWinnerPatterns(env, workspaceId) {
   const scored=measured.map(row=>({...row,velocity:Number(row.views||0)/Math.max(1,(Date.now()-new Date(row.published_at).getTime())/86400000)})).sort((a,b)=>b.velocity-a.velocity);
   const winners=scored.slice(0,Math.max(1,Math.ceil(scored.length*0.3))).slice(0,5);
   return {patterns:winners.map(row=>({title:String(row.title||"").slice(0,120),hook:String(row.hook||"").slice(0,180),viewsPerDay:Math.round(row.velocity)})),confidence:Math.min(1,measured.length/8),sampleSize:measured.length};
+  } catch (error) {
+    // Keep discovery operational before the optional performance-snapshot migration is applied.
+    console.warn("workspace_winner_learning_unavailable", error?.message || "unknown");
+    return {patterns:[],confidence:0,sampleSize:0};
+  }
 }
 
 async function processClipDiscovery(env, job) {
