@@ -92,10 +92,10 @@
       $("#settings-review").textContent=summary.stats.awaitingReview;
       $("#settings-published").textContent=summary.stats.published;
     }
-    const api=!!health.ok, db=!!health.database, storage=!!health.storage;
+    const api=!!health.ok, db=!!health.database, storage=!!health.mediaConfigured;
     $("#settings-api-status").textContent=api?"Operational":"Unavailable";
     $("#settings-db-status").textContent=db?"Connected":"Not connected";
-    $("#settings-storage-status").textContent=storage?"Connected":"Not connected";
+    $("#settings-storage-status").textContent=storage?"Configured":"Not configured";
     $("#settings-system-detail").textContent=health.version?"API version "+health.version:"Could not retrieve service details.";
     document.querySelectorAll(".settings-system-list i").forEach((dot,i)=>dot.classList.toggle("ok",[api,db,storage][i]));
     loaded=true;
