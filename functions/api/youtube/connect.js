@@ -12,6 +12,6 @@ export async function onRequestGet({request,env}){
  const now=new Date(),expires=new Date(now.getTime()+10*60*1000).toISOString();
  await env.DB.prepare("INSERT INTO youtube_oauth_states (state_hash,workspace_id,code_verifier,redirect_uri,expires_at,created_at) VALUES (?,?,?,?,?,?)").bind(stateHash,user.workspace.id,verifier,env.YOUTUBE_REDIRECT_URI,expires,now.toISOString()).run();
  const url=new URL("https://accounts.google.com/o/oauth2/v2/auth");
- for(const [k,v] of Object.entries({client_id:env.YOUTUBE_CLIENT_ID,redirect_uri:env.YOUTUBE_REDIRECT_URI,response_type:"code",scope:"https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",access_type:"offline",prompt:"consent",include_granted_scopes:"true",state,code_challenge:challenge,code_challenge_method:"S256"}))url.searchParams.set(k,v);
+ for(const [k,v] of Object.entries({client_id:env.YOUTUBE_CLIENT_ID,redirect_uri:env.YOUTUBE_REDIRECT_URI,response_type:"code",scope:"https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",access_type:"offline",prompt:"consent",include_granted_scopes:"true",state,code_challenge:challenge,code_challenge_method:"S256"}))url.searchParams.set(k,v);
  return Response.redirect(url.toString(),302);
 }
