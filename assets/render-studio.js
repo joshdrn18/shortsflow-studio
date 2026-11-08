@@ -76,8 +76,36 @@
  function drawMark(ctx,s,w,h){if(!s?.watermarkEnabled)return;const txt=String(s.watermarkText||"YOUR BRAND").slice(0,40),scale=s.watermarkScale==="large"?1.15:s.watermarkScale==="small"?.68:.88,font=Math.round(42*scale),pad=58;ctx.save();ctx.globalAlpha=Math.max(.1,Math.min(1,Number(s.watermarkOpacity)||.72));ctx.font=`800 ${font}px Manrope,Arial,sans-serif`;ctx.textBaseline="middle";const tw=ctx.measureText(txt).width,pos=s.watermarkPosition||"bottom-right";const x=pos.endsWith("left")?pad:pos.endsWith("center")||pos==="center"?(w-tw)/2:w-pad-tw;const y=pos.startsWith("top")?pad:pos==="center"?h/2:h-pad-font;ctx.shadowColor="#000";ctx.shadowBlur=12;ctx.fillStyle="#fff";ctx.fillText(txt,x,y);ctx.restore();}
  async function getJson(url){const r=await fetch(url,{headers:{accept:"application/json"}}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"Could not load render settings.");return d;}
  async function seek(v,target){if(Math.abs(v.currentTime-target)<.04)return;await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("Video seek timed out. Retry the render.")),12000);v.addEventListener("seeked",()=>{clearTimeout(timer);resolve();},{once:true});v.currentTime=target;});}
+ async function manageOldRenders(clipId,button){
+  let panel=$("#clip-render-cleanup-panel");
+  if(panel&&!panel.hidden){panel.hidden=true;return;}
+  if(!panel){panel=document.createElement("section");panel.id="clip-render-cleanup-panel";panel.className="panel";panel.style.marginTop="12px";button.insertAdjacentElement("afterend",panel);}
+  panel.hidden=false;panel.replaceChildren();const loading=document.createElement("p");loading.textContent="Checking old render versions…";panel.append(loading);button.disabled=true;
+  try{
+   const response=await fetch("/api/clips/"+encodeURIComponent(clipId)+"/render-assets",{headers:{accept:"application/json"}});
+   const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not load old renders.");
+   panel.replaceChildren();const heading=document.createElement("strong");heading.textContent="Unused old renders";panel.append(heading);
+   const summary=document.createElement("p");summary.textContent=data.items.length?data.items.length+" render(s) can be safely removed · "+(data.totalBytes/1048576).toFixed(1)+" MB":"No unused old renders available. The latest render and all renders used by Review Center or YouTube are protected.";panel.append(summary);
+   for(const item of data.items){
+    const row=document.createElement("div");row.className="render-cleanup-row";row.style.display="flex";row.style.alignItems="center";row.style.justifyContent="space-between";row.style.gap="12px";row.style.padding="8px 0";row.style.borderTop="1px solid var(--border,rgba(255,255,255,.12))";
+    const label=document.createElement("span");const date=item.createdAt?new Date(item.createdAt).toLocaleString():"";label.textContent="Render v"+item.version+" · "+(item.sizeBytes/1048576).toFixed(1)+" MB"+(date?" · "+date:"");
+    const remove=document.createElement("button");remove.type="button";remove.className="text-button";remove.textContent="Delete";remove.addEventListener("click",async()=>{
+     if(!window.confirm("Delete unused render v"+item.version+"? This cannot be undone."))return;
+     remove.disabled=true;remove.textContent="Deleting…";
+     try{const result=await fetch("/api/clips/"+encodeURIComponent(clipId)+"/render-assets?assetId="+encodeURIComponent(item.id),{method:"DELETE",headers:{accept:"application/json"}});const payload=await result.json();if(!result.ok||!payload.ok)throw new Error(payload.error||"Could not delete render.");row.remove();summary.textContent="Removed render v"+item.version+" · "+(payload.sizeBytes/1048576).toFixed(1)+" MB. Refresh this panel to check remaining versions.";}
+     catch(error){remove.disabled=false;remove.textContent="Retry";summary.textContent=error.message;}
+    });
+    row.append(label,remove);panel.append(row);
+   }
+  }catch(error){panel.replaceChildren();const message=document.createElement("p");message.textContent=error.message;panel.append(message);}
+  finally{button.disabled=false;}
+ }
+ function ensureCleanupButton(msg,clipId){
+  let button=$("#clip-render-cleanup");if(!button){button=document.createElement("button");button.type="button";button.id="clip-render-cleanup";button.className="text-button";button.textContent="Manage old renders";button.style.marginTop="10px";msg.insertAdjacentElement("afterend",button);button.addEventListener("click",()=>manageOldRenders(button.dataset.clipId,button));}
+  button.dataset.clipId=clipId;
+ }
  async function render(){
-  if(busy)return;const clip=window.__shortsflowActiveClip,v=$("#clip-preview-video"),btn=$("#clip-render-btn"),msg=$("#clip-render-message");if(!clip?.id||!v||!btn)return;
+  if(busy)return;const clip=window.__shortsflowActiveClip,v=$("#clip-preview-video"),btn=$("#clip-render-btn"),msg=$("#clip-render-message");if(!clip?.id||!v||!btn)return;ensureCleanupButton(msg,clip.id);
   if(!window.MediaRecorder||!v.captureStream||!HTMLCanvasElement.prototype.captureStream){msg.textContent="Browser rendering requires the latest Chrome or Edge.";return;}
   const current=window.__shortsflowActiveClip;
   const changedCut=Math.abs(Number(window.__shortsflowClipStart)-Number(clip.startSeconds))>.05||Math.abs(Number(window.__shortsflowClipEnd)-Number(clip.endSeconds))>.05;
