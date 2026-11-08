@@ -462,7 +462,8 @@ async function processClipDiscovery(env, job) {
   }
   const candidates = [];
   const windowDiagnostics = [];
-  for (let windowIndex = 0; windowIndex < windows.length; windowIndex++) {\n    const window = windows[windowIndex];
+  for (let windowIndex = 0; windowIndex < windows.length; windowIndex++) {
+    const window = windows[windowIndex];
     const timeline = window.words.map(w => "[" + Number(w.start).toFixed(2) + "-" + Number(w.end).toFixed(2) + "] " + String(w.word || "")).join(" ");
     const prompt = "Find 1 to 3 of the strongest distinct short-form clips inside this transcript window. Each must be 15–60 seconds, start with a compelling hook, make sense on its own, and end on a complete thought, joke, reveal, or payoff. Prefer meaningful moments; avoid greetings, filler, repeated lines and incomplete sentences. Use ONLY the supplied absolute word timestamps. Return fewer only if this window truly has fewer viable moments. Rank strongest first. Return compact JSON only: {\"candidates\":[{\"startSeconds\":12.3,\"endSeconds\":42.8,\"title\":\"Specific engaging title\",\"hook\":\"Opening line\",\"reason\":\"Why this moment works\",\"caption\":\"Short caption\",\"hashtags\":[\"#shorts\",\"#topic\"],\"score\":91}]}. Full source duration: " + duration.toFixed(2) + " seconds. Search window: " + window.from.toFixed(2) + "–" + window.to.toFixed(2) + " seconds. Transcript language: " + (transcript.language || "auto-detected") + ". Timestamped transcript: " + timeline;
     const inputTokens = Math.ceil((system.length + prompt.length) / 3);
