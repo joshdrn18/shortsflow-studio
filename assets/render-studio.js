@@ -33,9 +33,9 @@
   const current=groups.find(items=>items.includes(clean[active]));
   if(!current)return;
   const scale=Math.max(.82,Math.min(1.65,(Number(c.fontSize)||28)/28));
-  let size=Math.round(49*scale),maxWidth=w*.86,lines=[];
+  let size=Math.round(49*scale),weight=[600,700,800,900].includes(Number(c.fontWeight))?Number(c.fontWeight):900,maxWidth=w*.86,lines=[];
   const buildLines=fontSize=>{
-   ctx.font=`900 ${fontSize}px Manrope,Arial,sans-serif`;
+   ctx.font=`${weight} ${fontSize}px Manrope,Arial,sans-serif`;
    const out=[];let line=[];
    for(const token of current){
     const test=[...line,token],width=ctx.measureText(test.map(x=>x.word).join(" ")).width;
@@ -54,10 +54,10 @@
   const lh=Math.round(size*1.24),gap=10,padX=24,padY=12;
   const totalH=lines.length*lh+(lines.length-1)*gap;
   const frame=videoBox||{x:0,y:0,w,h};
-  const centerY=c.position==="top"?frame.y+frame.h*.2:c.position==="center"?frame.y+frame.h*.5:frame.y+frame.h*.8;
+  const edge=Math.max(.05,Math.min(.25,(Number(c.edgeOffset)||9)/100));const centerY=c.position==="top"?frame.y+frame.h*edge+totalH/2:c.position==="center"?frame.y+frame.h*.5:frame.y+frame.h*(1-edge)-totalH/2;
   const minY=frame.y+lh*.65,maxY=frame.y+frame.h-lh*.65;
   const top=Math.max(minY,Math.min(maxY-totalH,centerY-totalH/2));
-  ctx.save();ctx.font=`900 ${size}px Manrope,Arial,sans-serif`;ctx.textAlign="left";ctx.textBaseline="middle";
+  ctx.save();ctx.font=`${weight} ${size}px Manrope,Arial,sans-serif`;ctx.textAlign="left";ctx.textBaseline="middle";
   lines.forEach((items,i)=>{
    const widths=items.map(token=>ctx.measureText(token.word).width);
    const space=ctx.measureText(" ").width;
@@ -67,7 +67,7 @@
    items.forEach((token,j)=>{
     const word=token.word;
     ctx.lineWidth=Math.max(2,size*.075);ctx.strokeStyle="rgba(0,0,0,.92)";ctx.lineJoin="round";ctx.strokeText(word,x,y);
-    ctx.fillStyle=token===clean[active]?(c.highlight||"#b59aff"):(c.color||"#fff");ctx.fillText(word,x,y);
+    const isActive=token===clean[active];if(isActive&&c.highlightStyle==="pill"){ctx.fillStyle=c.highlight||"#b59aff";round(ctx,x-7,y-lh*.38,widths[j]+14,lh*.76,Math.min(10,lh*.2));ctx.fill();}ctx.fillStyle=isActive&&c.highlightStyle!=="pill"?(c.highlight||"#b59aff"):(c.color||"#fff");ctx.fillText(word,x,y);if(isActive&&c.highlightStyle==="underline"){ctx.strokeStyle=c.highlight||"#b59aff";ctx.lineWidth=Math.max(3,size*.09);ctx.beginPath();ctx.moveTo(x,y+lh*.42);ctx.lineTo(x+widths[j],y+lh*.42);ctx.stroke();}
     x+=widths[j]+space;
    });
   });
