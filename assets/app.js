@@ -35,7 +35,7 @@ function ensurePlaceholder() {
 function hideAllPagePanels() {
   [
     ".welcome-panel", ".section-head", ".stats-grid", ".lower-grid",
-    "#sources-workspace", "#clips-workspace", "#review-workspace", "#library-workspace", "#publisher-workspace", "#watermark-settings", "#feature-placeholder"
+    "#sources-workspace", "#clips-workspace", "#review-workspace", "#library-workspace", "#publisher-workspace", "#watermark-settings", "#workspace-settings", "#feature-placeholder"
   ].forEach((selector) => $(selector)?.classList.add("hidden"));
 }
 
