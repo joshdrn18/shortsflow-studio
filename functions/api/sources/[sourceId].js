@@ -100,7 +100,7 @@ export async function onRequestDelete({ request, env, params }) {
     const publishing = await env.DB.prepare(
       `SELECT pj.id, pj.status FROM publishing_jobs pj
        JOIN clips c ON c.id = pj.clip_id
-       WHERE c.source_video_id = ? AND c.workspace_id = ? AND pj.status IN ('uploading','processing')`
+       WHERE c.source_video_id = ? AND c.workspace_id = ? AND pj.status IN ('queued','uploading','processing')`
     ).bind(sourceId, workspaceId).all();
     if ((publishing.results || []).length) {
       return json({ ok: false, error: "A clip from this source is currently being published. Wait until publishing finishes before deleting the source." }, 409);
