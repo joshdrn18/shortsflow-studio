@@ -69,6 +69,46 @@ function navigate(view) {
 }
 navItems.forEach((button) => button.addEventListener("click", () => navigate(button.dataset.view)));
 
+const workspaceMenuTrigger = $("#workspace-menu-trigger");
+const workspaceMenu = $("#workspace-menu");
+function closeWorkspaceMenu() {
+  workspaceMenu?.classList.add("hidden");
+  workspaceMenuTrigger?.setAttribute("aria-expanded", "false");
+}
+workspaceMenuTrigger?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const opening = workspaceMenu?.classList.contains("hidden");
+  workspaceMenu?.classList.toggle("hidden", !opening);
+  workspaceMenuTrigger.setAttribute("aria-expanded", String(Boolean(opening)));
+});
+workspaceMenu?.addEventListener("click", async (event) => {
+  const action = event.target.closest("[data-workspace-action]")?.dataset.workspaceAction;
+  if (!action) return;
+  closeWorkspaceMenu();
+  if (action === "settings") {
+    navigate("settings");
+  } else if (action === "refresh") {
+    await Promise.all([checkHealth(), loadWorkspaceSummary()]);
+    toast("Workspace refreshed.");
+  } else if (action === "logout") {
+    if (!confirm("Sign out of this ShortsFlow workspace?")) return;
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST", headers: { accept: "application/json" } });
+      if (!response.ok) throw new Error("Sign out failed. Please try again.");
+      showAuth("You have signed out.");
+    } catch (error) {
+      toast(error.message || "Could not sign out.");
+    }
+  }
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".workspace-menu-wrap")) closeWorkspaceMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeWorkspaceMenu();
+});
+
+
 $("#mobile-menu")?.addEventListener("click", () => $("#sidebar")?.classList.toggle("open"));
 $("#add-source-btn")?.addEventListener("click", () => {
   navigate("sources");
