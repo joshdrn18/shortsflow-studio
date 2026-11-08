@@ -171,6 +171,29 @@ profiles = connection.execute(
 ).fetchall()
 if profiles != [("Gaming",), ("Podcast",)]:
     raise SystemExit(f"Brand Profile persistence failed: {profiles}")
+
+# Publisher metadata templates persist independently for each Brand Profile.
+metadata_config = {
+    "titleTemplate": "{clip_title} #Shorts",
+    "descriptionTemplate": "{clip_title}\\n\\n{hashtags}",
+    "hashtags": "#shorts #gaming",
+    "tags": "shorts, gaming",
+}
+connection.execute(
+    "UPDATE workspace_brand_profiles SET metadata_config_json=? WHERE id=? AND workspace_id=?",
+    (
+        __import__("json").dumps(metadata_config, separators=(",", ":")),
+        "brand-profile-a",
+        "workspace-test",
+    ),
+)
+saved_metadata = connection.execute(
+    "SELECT metadata_config_json FROM workspace_brand_profiles WHERE id=? AND workspace_id=?",
+    ("brand-profile-a", "workspace-test"),
+).fetchone()
+if saved_metadata is None or __import__("json").loads(saved_metadata[0]) != metadata_config:
+    raise SystemExit("Brand Profile metadata template persistence failed")
+
 connection.execute(
     "UPDATE workspace_brand_kits SET active_profile_id=? WHERE workspace_id=?",
     ("brand-profile-a", "workspace-test"),
