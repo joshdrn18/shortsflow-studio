@@ -54,7 +54,7 @@
   const lh=Math.round(size*1.24),gap=10,padX=24,padY=12;
   const totalH=lines.length*lh+(lines.length-1)*gap;
   const frame=videoBox||{x:0,y:0,w,h};
-  const centerY=c.position==="top"?frame.y+frame.h*.2:frame.y+frame.h*.8;
+  const centerY=c.position==="top"?frame.y+frame.h*.2:c.position==="center"?frame.y+frame.h*.5:frame.y+frame.h*.8;
   const minY=frame.y+lh*.65,maxY=frame.y+frame.h-lh*.65;
   const top=Math.max(minY,Math.min(maxY-totalH,centerY-totalH/2));
   ctx.save();ctx.font=`900 ${size}px Manrope,Arial,sans-serif`;ctx.textAlign="left";ctx.textBaseline="middle";
