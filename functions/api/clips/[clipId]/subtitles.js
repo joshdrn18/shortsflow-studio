@@ -15,7 +15,10 @@ function cleanConfig(value) {
     color: colors.includes(v.color) ? v.color : DEFAULTS.color,
     highlight: highlights.includes(v.highlight) ? v.highlight : DEFAULTS.highlight,
     position: ["top", "center", "bottom"].includes(v.position) ? v.position : DEFAULTS.position,
-    background: v.background !== false
+    background: v.background !== false,
+    edgeOffset: Math.max(5, Math.min(25, Math.round(Number(v.edgeOffset) || 9))),
+    fontWeight: [600, 700, 800, 900].includes(Number(v.fontWeight)) ? Number(v.fontWeight) : 900,
+    highlightStyle: ["color", "pill", "underline"].includes(v.highlightStyle) ? v.highlightStyle : "color"
   };
 }
 
