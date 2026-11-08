@@ -186,3 +186,19 @@
 .job-cancel-button{display:inline-flex!important;align-items:center;justify-content:center;min-width:88px;padding:8px 12px!important;border:1px solid #8b3e49!important;border-radius:7px!important;background:#351b23!important;color:#ffb1b8!important;font-size:10px!important;font-weight:800!important;white-space:nowrap}.job-cancel-button:hover{background:#51232e!important;border-color:#d15a69!important}.job-running-note{font-size:9px;color:#a9a4b5;white-space:normal}
 
 .clip-preview-timeline{display:grid;grid-template-columns:48px minmax(0,1fr) 48px;align-items:center;gap:10px;margin:9px 2px 2px;color:#b9bfd0;font:600 10px 'DM Sans',sans-serif;font-variant-numeric:tabular-nums}.clip-preview-timeline input{width:100%;accent-color:#a78bfa;cursor:pointer}.clip-preview-dialog video{max-height:52vh}
+
+/* Interactive workspace identity menu */
+.workspace-menu-wrap{position:relative;margin-top:12px}
+button.profile-row{width:100%;min-width:0;display:flex;align-items:center;gap:11px;padding:8px 7px;border:1px solid transparent;border-radius:10px;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit;transition:background .16s,border-color .16s}
+button.profile-row:hover,button.profile-row[aria-expanded="true"]{background:#191c25;border-color:#302b3d}
+.profile-row .avatar{display:grid;place-items:center;flex:0 0 30px;width:30px;height:30px;border-radius:9px;background:#30264b;color:#c9b8ff;font-weight:800}
+.profile-copy{display:grid;gap:3px;flex:1;min-width:0}
+.profile-copy strong{font-size:11px;color:#e9e8f0}
+.profile-copy small{font-size:9px;color:#898d9d}
+.profile-menu{margin-left:auto;color:#9295a4;font-size:13px;letter-spacing:1px}
+.workspace-menu{position:absolute;z-index:50;left:0;right:0;bottom:calc(100% + 8px);padding:6px;border:1px solid #343044;border-radius:11px;background:#171821;box-shadow:0 14px 38px #0009}
+.workspace-menu button{display:block;width:100%;padding:10px;border:0;border-radius:7px;background:transparent;color:#d8d7e2;text-align:left;font:600 10px 'DM Sans',sans-serif;cursor:pointer}
+.workspace-menu button:hover{background:#282436;color:#fff}
+.workspace-menu .workspace-menu-danger{color:#f0a5a5}
+.workspace-menu .workspace-menu-danger:hover{background:#3b2028;color:#ffb9bf}
+.workspace-menu-divider{height:1px;margin:5px 4px;background:#302e3a}
