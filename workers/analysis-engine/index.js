@@ -538,11 +538,24 @@ async function processClipDiscovery(env, job) {
   }
 
   const existingResult = await env.DB.prepare(
-    "SELECT start_seconds, end_seconds FROM clips WHERE discovery_job_id = ?"
+    "SELECT start_seconds, end_seconds, transcript, title, hook FROM clips WHERE discovery_job_id = ?"
   ).bind(job.id).all();
-  const existing = (existingResult.results || []).map(row => ({ start: Number(row.start_seconds), end: Number(row.end_seconds) }));
+  const existing = (existingResult.results || []).map(row => ({
+    start: Number(row.start_seconds), end: Number(row.end_seconds),
+    transcript: String(row.transcript || ""), title: String(row.title || ""), hook: String(row.hook || "")
+  }));
   const accepted = [];
-  const rejected = { invalidTime: 0, boundary: 0, tooShort: 0, tooLong: 0, outsideDuration: 0, overlap: 0, missingHook: 0, missingExcerpt: 0 };
+  const rejected = { invalidTime: 0, boundary: 0, tooShort: 0, tooLong: 0, outsideDuration: 0, overlap: 0, duplicateContent: 0, missingHook: 0, missingExcerpt: 0 };
+  const contentTokens = value => new Set(String(value || "").toLowerCase()
+    .replace(/[^\\p{L}\\p{N}\\s]/gu, " ").split(/\\s+/)
+    .filter(token => token.length >= 3 && !/^(the|and|that|this|with|from|then|when|what|where|which|have|will|your|you|are|was|were|for|but|not|can|just|like|they|them|their|there|into|about|because|jadi|yang|dan|atau|untuk|dari|dengan|ini|itu|kamu|aku|dia|ada|bisa|akan|kalau|karena|pada|dalam)$/i.test(token)));
+  const contentSimilarity = (left, right) => {
+    const a = contentTokens(left), b = contentTokens(right);
+    if (a.size < 5 || b.size < 5) return 0;
+    let common = 0;
+    for (const token of a) if (b.has(token)) common++;
+    return common / Math.min(a.size, b.size);
+  };
   let expandedShortMoments = 0;
   const nearest = (value, field) => words.reduce((best, word) => {
     const current = Number(word[field]);
@@ -671,16 +684,25 @@ async function processClipDiscovery(env, job) {
     if (start < 0 || end > duration) { rejected.outsideDuration++; continue; }
     if (clipDuration < 15) { rejected.tooShort++; continue; }
     if (clipDuration > 60) { rejected.tooLong++; continue; }
-    const overlaps = [...existing, ...accepted].some(other => {
+    const excerpt = words.filter(word => Number(word.start) >= start && Number(word.end) <= end).map(word => String(word.word || "")).join(" ").trim();
+    if (!excerpt) { rejected.missingExcerpt++; continue; }
+    const priorCandidates = [...existing, ...accepted];
+    const overlaps = priorCandidates.some(other => {
+      const otherDuration = Math.max(1, other.end - other.start);
       const overlap = Math.max(0, Math.min(end, other.end) - Math.max(start, other.start));
-      return overlap / Math.min(clipDuration, other.end - other.start) > 0.3;
+      const overlapRatio = overlap / Math.min(clipDuration, otherDuration);
+      const nearSameMoment = Math.abs(start - other.start) <= 8 && Math.abs(end - other.end) <= 12;
+      return overlapRatio > 0.3 || nearSameMoment;
     });
     if (overlaps) { rejected.overlap++; continue; }
+    const duplicateContent = priorCandidates.some(other => {
+      const otherText = [other.transcript, other.title, other.hook].filter(Boolean).join(" ");
+      return contentSimilarity(excerpt, otherText) >= 0.72;
+    });
+    if (duplicateContent) { rejected.duplicateContent++; continue; }
 
     const hook = String(candidate.hook || candidate.title || "").trim().slice(0, 220);
     if (!hook) { rejected.missingHook++; continue; }
-    const excerpt = words.filter(word => Number(word.start) >= start && Number(word.end) <= end).map(word => String(word.word || "")).join(" ").trim();
-    if (!excerpt) { rejected.missingExcerpt++; continue; }
     const proposedTitle = String(candidate.title || "").trim();
     const genericTitle = /^(yes|yeah|yep|no|okay|ok|wow|whoa|oh|hey|look|wait|what|huh|hello|hi)[.!?\s]*$/i.test(proposedTitle);
     const title = String(genericTitle ? (candidate.reason || excerpt.split(/[.!?]/)[0] || candidate.hook) : (proposedTitle || candidate.reason || excerpt.split(/[.!?]/)[0] || "Untitled clip")).trim().slice(0, 120);
@@ -700,7 +722,7 @@ async function processClipDiscovery(env, job) {
     const clipId = crypto.randomUUID();
     const metadataId = crypto.randomUUID();
     const now = new Date().toISOString();
-    accepted.push({ start, end, score: item.score });
+    accepted.push({ start, end, score: item.score, transcript: excerpt, title, hook });
     await env.DB.batch([
       env.DB.prepare(
         `INSERT OR IGNORE INTO clips
