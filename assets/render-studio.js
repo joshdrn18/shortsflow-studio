@@ -83,7 +83,7 @@
   const changedCut=Math.abs(Number(window.__shortsflowClipStart)-Number(clip.startSeconds))>.05||Math.abs(Number(window.__shortsflowClipEnd)-Number(clip.endSeconds))>.05;
   const changedMeta=$("#clip-edit-title")?.value.trim()!==(clip.title||"")||$("#clip-edit-caption")?.value.trim()!==(clip.caption||"")||$("#clip-edit-hashtags")?.value.trim()!==(clip.hashtags||"")||$("#clip-edit-language")?.value.trim()!==(clip.language||"");
   if(changedCut||changedMeta||window.__shortsflowSubtitleDirty||window.__shortsflowWatermarkDirty){msg.textContent="Save your clip edits, subtitle style and watermark settings first, then render again.";return;}
-  busy=true;btn.disabled=true;btn.textContent="Preparing…";let recorder=null,canvasStream=null,sourceStream=null,frame=0,stopped=false;
+  busy=true;btn.disabled=true;btn.textContent="Preparing…";let recorder=null,canvasStream=null,sourceStream=null,frame=0,stopped=false,xhr=null;\n  const cancelBtn=document.createElement("button");cancelBtn.type="button";cancelBtn.id="clip-render-cancel";cancelBtn.className=btn.className;cancelBtn.textContent="Cancel render";cancelBtn.style.marginLeft="8px";btn.insertAdjacentElement("afterend",cancelBtn);\n  const task={cancelled:false,cancel(){if(this.cancelled)return;this.cancelled=true;stopped=true;cancelAnimationFrame(frame);try{if(v&&!v.paused)v.pause();}catch{}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(xhr&&xhr.readyState!==XMLHttpRequest.DONE)xhr.abort();msg.textContent="Render cancelled. No new render was saved.";}};activeCancel=task;cancelBtn.addEventListener("click",()=>task.cancel());
   try{
    msg.textContent="Loading saved cut, subtitles and watermark…";
    const [sub,settings]=await Promise.all([getJson("/api/clips/"+encodeURIComponent(clip.id)+"/subtitles"),getJson("/api/workspace/settings")]);
@@ -126,7 +126,7 @@
    const link=document.createElement("a");link.href=result.asset.url;link.target="_blank";link.rel="noopener";link.textContent="Open rendered video ↗";msg.append(link);
    btn.textContent="Render again";
   }catch(e){msg.textContent=e.message||"Render failed. Retry.";btn.textContent="Retry render";}
-  finally{stopped=true;cancelAnimationFrame(frame);if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(sourceStream)sourceStream.getTracks().forEach(t=>t.stop());busy=false;btn.disabled=false;}
+  finally{stopped=true;cancelAnimationFrame(frame);if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(sourceStream)sourceStream.getTracks().forEach(t=>t.stop());cancelBtn.remove();if(activeCancel===task)activeCancel=null;busy=false;btn.disabled=false;}
  }
  document.addEventListener("click",e=>{if(e.target.closest("#clip-render-btn"))render();});
 })();
