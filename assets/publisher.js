@@ -1,6 +1,6 @@
 (() => {
  const $=s=>document.querySelector(s),esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- let state={connection:null,jobs:[],eligible:[],loading:false,profiles:[],activeProfileId:null};
+ let state={connection:null,jobs:[],eligible:[],loading:false,profiles:[],activeProfileId:null,metrics:null};
  const date=v=>{if(!v)return"Publish as soon as the uploader is available";const d=new Date(v);return Number.isNaN(d.getTime())?"—":d.toLocaleString([], {dateStyle:"medium",timeStyle:"short"});};
  function ensure(){
   if($("#publisher-workspace"))return;
@@ -9,6 +9,7 @@
    <div class="publisher-hero"><div><span class="publisher-kicker">YOUTUBE STUDIO · PUBLISHING</span><h2>Your next Short,<br><em>ready when you are.</em></h2><p>Connect your channel, choose an approved render, prepare its metadata and schedule the upload. Nothing is sent without your explicit action.</p></div><div class="publisher-lock"><span>▶</span><b>Approval protected</b><small>Only approved current renders</small></div></div>
    <section class="publisher-connect panel"><div class="publisher-channel-mark">▶</div><div class="publisher-channel-copy"><span class="publisher-kicker">CHANNEL CONNECTION</span><h3 id="youtube-channel-title">YouTube channel not connected</h3><p id="youtube-channel-detail">Connect your Google account to prepare YouTube uploads.</p></div><a class="primary-button" id="youtube-connect" href="/api/youtube/connect">Connect YouTube <span>↗</span></a></section>
    <div class="publisher-stats"><div><span>Approved & ready</span><strong id="publisher-eligible">—</strong></div><div><span>Queued uploads</span><strong id="publisher-queued">—</strong></div><div><span>Published</span><strong id="publisher-published">—</strong></div></div>
+   <section class="publisher-section publisher-performance"><div class="publisher-section-head"><div><span class="publisher-kicker">90-DAY GROWTH TRACKER</span><h3>10M Shorts views target</h3><p>Track views on Shorts published during the last 90 days. Refresh to pull the latest YouTube counts.</p></div><button class="text-button" id="publisher-metrics-sync" type="button">↻ Sync views</button></div><div class="publisher-growth-stats"><div><span>Tracked views</span><strong id="publisher-metric-views">—</strong></div><div><span>Published Shorts</span><strong id="publisher-metric-videos">—</strong></div><div><span>Likes</span><strong id="publisher-metric-likes">—</strong></div><div><span>Comments</span><strong id="publisher-metric-comments">—</strong></div></div><div class="publisher-growth-track"><div class="publisher-growth-track-head"><b id="publisher-metric-progress">0% of 10M</b><span id="publisher-metric-updated">Not synced yet</span></div><div class="publisher-growth-bar"><span id="publisher-metric-bar"></span></div></div><div id="publisher-metric-videos-list" class="publisher-metric-videos"><div class="publisher-empty">Sync your YouTube channel to load performance.</div></div><small class="publisher-metric-note">YouTube Data API provides lifetime view counts for each video. This tracker is not a date-range analytics report and does not represent retention or unique viewers.</small></section>
    <section class="publisher-section"><div class="publisher-section-head"><div><span class="publisher-kicker">UPLOAD PLANNER</span><h3>Prepare a YouTube Short</h3><p>Pick a clip approved in Review Center. Its approval is checked again when you queue it.</p></div></div>
     <form id="publisher-form" class="publisher-form">
      <label>Approved render<select id="publisher-clip" required><option value="">Loading approved renders…</option></select></label>
@@ -25,6 +26,7 @@
   $(".page-content")?.append(panel);
   $("#youtube-connect").addEventListener("click",e=>{e.preventDefault();window.location.href="/api/youtube/connect";});
   $("#publisher-refresh").addEventListener("click",load);
+  $("#publisher-metrics-sync").addEventListener("click",syncMetrics);
   $("#publisher-clip").addEventListener("change",()=>{const item=state.eligible.find(x=>x.clipId===$("#publisher-clip").value);if(item){$("#publisher-title").value=item.title||"";$("#publisher-description").value=item.caption||"";}});
   $("#publisher-brand-profile").addEventListener("change",loadBrandTemplateFields);
   $("#publisher-brand-save").addEventListener("click",saveBrandTemplate);
@@ -79,6 +81,32 @@
   renderMetadataPreview();
  }
 
+ function metricNumber(value){return new Intl.NumberFormat().format(Number(value||0));}
+ async function loadMetrics(){
+  const views=$("#publisher-metric-videos-list");if(!views)return;
+  try{
+   const response=await fetch("/api/youtube/analytics",{headers:{accept:"application/json"}});
+   const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Metrics unavailable.");
+   state.metrics=data;
+   $("#publisher-metric-views").textContent=metricNumber(data.totals?.views);
+   $("#publisher-metric-videos").textContent=metricNumber(data.videoCount);
+   $("#publisher-metric-likes").textContent=metricNumber(data.totals?.likes);
+   $("#publisher-metric-comments").textContent=metricNumber(data.totals?.comments);
+   $("#publisher-metric-progress").textContent=(Number(data.progressPercent||0).toFixed(2))+"% of 10M";
+   $("#publisher-metric-bar").style.width=Math.min(100,Math.max(0,Number(data.progressPercent||0)))+"%";
+   $("#publisher-metric-updated").textContent=data.lastSyncedAt?"Synced "+date(data.lastSyncedAt):"Not synced yet";
+   const top=(data.videos||[]).filter(v=>v.views!==null&&v.views!==undefined).sort((a,b)=>Number(b.views)-Number(a.views)).slice(0,5);
+   views.innerHTML=top.length?top.map((v,i)=>'<article class="publisher-metric-video"><span class="publisher-metric-rank">'+(i+1)+'</span><div><b>'+esc(v.title||v.clip_title||"YouTube Short")+'</b><small>'+esc(v.source_title||"")+'</small></div><strong>'+metricNumber(v.views)+' views</strong>'+(v.platform_url?'<a href="'+esc(v.platform_url)+'" target="_blank" rel="noopener">Watch ↗</a>':"")+'</article>').join(""):'<div class="publisher-empty">No published video metrics yet. Publish a Short, then sync again.</div>';
+   const note=$(".publisher-metric-note");if(note)note.textContent=data.note||"Metrics are provided by YouTube Data API.";
+  }catch(error){views.innerHTML='<div class="publisher-empty">'+esc(error.message)+"</div>";}
+ }
+ async function syncMetrics(){
+  const button=$("#publisher-metrics-sync");if(!button)return;
+  button.disabled=true;button.textContent="Syncing…";
+  try{const response=await fetch("/api/youtube/analytics",{method:"POST",headers:{accept:"application/json"}}),data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not sync metrics.");await loadMetrics();setMessage(data.synced?("Synced "+data.synced+" published video metrics."):(data.message||"Metrics are up to date."));}
+  catch(error){setMessage(error.message,true);}
+  finally{button.disabled=false;button.textContent="↻ Sync views";}
+ }
  function renderMetadataPreview(){
   const title=$("#publisher-title")?.value.trim()||"";
   const description=$("#publisher-description")?.value.trim()||"";
@@ -122,6 +150,7 @@
    catch{setMessage("Brand Profiles unavailable. Publisher queue remains usable; apply migration 0017 to enable saved metadata templates.",true);}
    state.connection=p.connection;state.jobs=p.jobs||[];state.eligible=(r.items||[]).filter(x=>x.decision==="approved");state.profiles=b.profiles||[];state.activeProfileId=b.activeProfileId||null;
    render();renderBrandProfileOptions();loadBrandTemplateFields();
+   loadMetrics();
   }catch(e){setMessage(e.message,true);}
   finally{state.loading=false;}
  }
