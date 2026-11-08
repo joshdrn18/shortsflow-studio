@@ -619,8 +619,12 @@ async function processClipDiscovery(env, job) {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'discovered', ?, ?, ?)`
       ).bind(clipId, job.workspace_id, job.source_video_id, title, start, end, hook, item.score, excerpt, job.id, now, now),
       env.DB.prepare(
-        "INSERT OR IGNORE INTO clip_metadata (id, clip_id, version, title, caption, hashtags, language, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?)"
-      ).bind(metadataId, clipId, title, caption, hashtags, transcript.language || null, now)
+        `INSERT OR IGNORE INTO clip_metadata (id, clip_id, version, title, caption, hashtags, language, created_at)
+         SELECT ?, c.id, 1, ?, ?, ?, ?, ?
+         FROM clips c
+         WHERE c.discovery_job_id = ? AND c.start_seconds = ? AND c.end_seconds = ?
+         AND NOT EXISTS (SELECT 1 FROM clip_metadata m WHERE m.clip_id = c.id AND m.version = 1)`
+      ).bind(metadataId, title, caption, hashtags, transcript.language || null, now, job.id, start, end)
     ]);
   }
 
