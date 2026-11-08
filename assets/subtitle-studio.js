@@ -33,7 +33,7 @@
     if(!config.enabled){overlay.innerHTML="";return;}
     const t=video.currentTime-Number(window.__shortsflowClipStart||0);
     const active=words.findIndex(w=>t>=w.start&&t<=w.end);
-    if(active<0){overlay.innerHTML="";return;}
+    if(active<0){if(overlay.innerHTML){overlay.innerHTML="";delete overlay.dataset.renderKey;}return;}
     // Keep the live preview grouping identical to the browser render:
     // max four words, split after long pauses and sentence-ending punctuation.
     const groups=[];let current=[];
@@ -45,13 +45,13 @@
       current.push(word);
     }
     if(current.length)groups.push(current);
-    const group=groups.find(items=>items.some(w=>w===words[active]))||[];
+    const group=groups.find(items=>items.some(w=>w===words[active]))||[];const key=String(words.indexOf(group[0]))+":"+active;if(overlay.dataset.renderKey===key)return;overlay.dataset.renderKey=key;
     overlay.innerHTML=group.map(w=>'<span class="'+(w===words[active]?"is-active":"")+'">'+esc(w.word)+'</span>').join(" ");
   }
   async function load(){
     const clip=window.__shortsflowActiveClip;
     if(!clip?.id)return;
-    clipId=clip.id;$("#subtitle-status").textContent="Loading subtitle timing…";words=[];
+    clipId=clip.id;delete $("#subtitle-live-overlay").dataset.renderKey;$("#subtitle-status").textContent="Loading subtitle timing…";words=[];
     try{
       const r=await fetch("/api/clips/"+encodeURIComponent(clipId)+"/subtitles",{headers:{accept:"application/json"}});
       const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"Subtitle data unavailable.");
