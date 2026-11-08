@@ -29,12 +29,38 @@
       const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||"Could not load sources.");
       $("#source-count").textContent=d.sources.length;
       if(!d.sources.length){list.innerHTML='<div class="source-empty-state"><div class="source-empty-icon">▤</div><b>Your library is ready</b><p>Upload your first video to create a searchable library and discover clips with AI.</p><button type="button" class="text-button" id="empty-upload-btn">＋ Add your first video</button></div>';$("#empty-upload-btn").addEventListener("click",()=>$("#source-file").click());return;}
-      list.innerHTML=d.sources.map(s=>'<article class="source-card"><div class="source-card-visual"><span class="source-card-play">▶</span><span class="source-card-duration">'+esc(formatDuration(s.durationSeconds))+'</span><span class="source-card-format">'+esc((s.mimeType||"video").replace("video/","").toUpperCase())+'</span></div><div class="source-card-body"><div class="source-card-title"><strong title="'+esc(s.title)+'">'+esc(s.title)+'</strong><span class="source-status source-status-'+esc(s.status)+'">'+esc(s.status)+'</span></div><div class="source-card-details"><span>'+bytes(s.sizeBytes)+'</span><i></i><span>'+esc(new Date(s.createdAt).toLocaleDateString())+'</span></div><div class="source-card-actions"><button type="button" class="source-action-main preview-source-btn" data-source-id="'+esc(s.id)+'" data-source-title="'+esc(s.title)+'">Preview video</button><button type="button" class="source-action-icon queue-source-btn" title="Queue AI analysis" aria-label="Queue AI analysis" data-source-id="'+esc(s.id)+'">✳</button><button type="button" class="source-action-icon view-transcript-btn" title="View transcript" aria-label="View transcript" data-source-id="'+esc(s.id)+'" '+(s.transcriptStatus==="completed"?"":"disabled")+'>CC</button></div></div></article>').join("");
+      list.innerHTML=d.sources.map(s=>'<article class="source-card"><div class="source-card-visual"><span class="source-card-play">▶</span><span class="source-card-duration">'+esc(formatDuration(s.durationSeconds))+'</span><span class="source-card-format">'+esc((s.mimeType||"video").replace("video/","").toUpperCase())+'</span></div><div class="source-card-body"><div class="source-card-title"><strong title="'+esc(s.title)+'">'+esc(s.title)+'</strong><span class="source-status source-status-'+esc(s.status)+'">'+esc(s.status)+'</span></div><div class="source-card-details"><span>'+bytes(s.sizeBytes)+'</span><i></i><span>'+esc(new Date(s.createdAt).toLocaleDateString())+'</span></div><div class="source-card-actions"><button type="button" class="source-action-main preview-source-btn" data-source-id="'+esc(s.id)+'" data-source-title="'+esc(s.title)+'">Preview video</button><button type="button" class="source-action-icon queue-source-btn" title="Queue AI analysis" aria-label="Queue AI analysis" data-source-id="'+esc(s.id)+'">✳</button><button type="button" class="source-action-icon view-transcript-btn" title="View transcript" aria-label="View transcript" data-source-id="'+esc(s.id)+'" '+(s.transcriptStatus==="completed"?"":"disabled")+'>CC</button><button type="button" class="source-action-icon delete-source-btn" title="Delete source and generated files" aria-label="Delete source" data-source-id="'+esc(s.id)+'">✕</button></div></div></article>').join("");
       list.querySelectorAll(".queue-source-btn").forEach(btn=>btn.addEventListener("click",()=>queueSource(btn.dataset.sourceId,btn)));
       list.querySelectorAll(".preview-source-btn").forEach(btn=>btn.addEventListener("click",()=>openPreview(btn.dataset.sourceId,btn.dataset.sourceTitle)));
       list.querySelectorAll(".view-transcript-btn").forEach(btn=>btn.addEventListener("click",()=>openTranscript(btn.dataset.sourceId,btn.closest(".source-row")?.querySelector(".source-file-info strong")?.textContent)));
+      list.querySelectorAll(".delete-source-btn").forEach(btn=>btn.addEventListener("click",()=>deleteSource(btn.dataset.sourceId,btn)));
       await loadJobs();
     } catch(e){list.innerHTML='<div class="sources-empty error"><b>Could not load sources</b><p>'+esc(e.message)+'</p></div>';}
+  }
+  async function deleteSource(sourceId, button) {
+    const confirmed=confirm("Delete this source video permanently?\n\nThis also removes its transcripts, discovered clips, rendered files and pending processing jobs from ShortsFlow storage. Videos already published to YouTube will remain on your channel, but their local ShortsFlow records will be removed.");
+    if(!confirmed)return;
+    button.disabled=true;
+    button.textContent="…";
+    try {
+      const response=await fetch("/api/sources/"+encodeURIComponent(sourceId),{
+        method:"DELETE",
+        headers:{accept:"application/json"}
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok||!data.ok)throw new Error(data.error||"Could not delete source video.");
+      await load();
+      fetch("/api/workspace/summary").then(r=>r.json()).then(d=>{
+        if(d.ok&&d.stats)$("#stat-sources").textContent=d.stats.sources;
+        if(d.ok&&d.stats)$("#stat-clips").textContent=d.stats.clips;
+      }).catch(()=>{});
+      const box=$("#upload-progress"),status=$("#upload-status");
+      if(box&&status){box.classList.remove("hidden");status.classList.remove("error-text");status.textContent="Source and "+Number(data.deleted?.clips||0)+" generated clip(s) deleted. Private storage cleaned up.";}
+    } catch(error) {
+      button.disabled=false;
+      button.textContent="✕";
+      alert(error.message||"Source deletion failed. Please retry.");
+    }
   }
   function openPreview(sourceId, title) {
     const dialog=$("#source-preview-dialog");
