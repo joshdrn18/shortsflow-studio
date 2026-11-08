@@ -245,3 +245,6 @@ button.profile-row:hover,button.profile-row[aria-expanded="true"]{background:#19
 .settings-system-list i.ok{background:#73d49a;box-shadow:0 0 9px #73d49a66}
 .settings-system-list b{font-size:9px;color:#aeb1bf}
 @media(max-width:760px){.settings-layout{grid-template-columns:1fr}.settings-nav{position:static;grid-template-columns:repeat(2,minmax(0,1fr))}.settings-content{padding:15px}.settings-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.settings-intro{padding:21px;flex-direction:column}.settings-private{align-self:flex-start}}
+
+/* Subtitle word entrance animations */
+.subtitle-live-overlay.animation-pop span.is-active{animation:sf-word-pop var(--subtitle-animation-duration,160ms) cubic-bezier(.2,.8,.2,1) both;transform-origin:center}.subtitle-live-overlay.animation-fade span.is-active{animation:sf-word-fade var(--subtitle-animation-duration,160ms) ease-out both}.subtitle-live-overlay.animation-slide span.is-active{animation:sf-word-slide var(--subtitle-animation-duration,160ms) cubic-bezier(.2,.8,.2,1) both}@keyframes sf-word-pop{from{opacity:.35;transform:scale(.72)}to{opacity:1;transform:scale(1)}}@keyframes sf-word-fade{from{opacity:0}to{opacity:1}}@keyframes sf-word-slide{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}
