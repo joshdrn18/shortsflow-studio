@@ -34,9 +34,19 @@
     const t=video.currentTime-Number(window.__shortsflowClipStart||0);
     const active=words.findIndex(w=>t>=w.start&&t<=w.end);
     if(active<0){overlay.innerHTML="";return;}
-    let first=active;while(first>0&&active-first<3&&words[first-1].end>=words[first].start-.18)first--;
-    const group=words.slice(first,Math.min(words.length,first+7)).filter(w=>w.start<=t+2.2);
-    overlay.innerHTML=group.map((w,i)=>'<span class="'+(first+i===active?"is-active":"")+'">'+esc(w.word)+'</span>').join(" ");
+    // Keep the live preview grouping identical to the browser render:
+    // max four words, split after long pauses and sentence-ending punctuation.
+    const groups=[];let current=[];
+    for(const word of words){
+      const previous=current[current.length-1];
+      const gap=previous?Number(word.start)-Number(previous.end):0;
+      const sentenceEnd=previous&&/[.!?…][”’"')\\]]*$/.test(String(previous.word||""));
+      if(current.length&&(current.length>=4||gap>.65||sentenceEnd)){groups.push(current);current=[];}
+      current.push(word);
+    }
+    if(current.length)groups.push(current);
+    const group=groups.find(items=>items.some(w=>w===words[active]))||[];
+    overlay.innerHTML=group.map(w=>'<span class="'+(w===words[active]?"is-active":"")+'">'+esc(w.word)+'</span>').join(" ");
   }
   async function load(){
     const clip=window.__shortsflowActiveClip;
