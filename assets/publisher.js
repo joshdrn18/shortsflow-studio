@@ -67,7 +67,8 @@
   $("#publisher-tags").value=tags.join(", ");
   setMessage("Brand metadata applied. Review the title, description and tags before queueing.");
  }
-\n function setMessage(msg,error=false){const el=$("#publisher-message");el.textContent=msg;el.classList.toggle("error",error);}
+
+ function setMessage(msg,error=false){const el=$("#publisher-message");el.textContent=msg;el.classList.toggle("error",error);}
  function render(){
   const c=state.connection;
   $("#youtube-channel-title").textContent=c?.connected?c.channelTitle:"YouTube channel not connected";
