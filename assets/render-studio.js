@@ -109,6 +109,26 @@
    if(!response.ok||!data.ok)throw new Error(data.error||"Could not load render history.");
    panel.replaceChildren();const heading=document.createElement("strong");heading.textContent="Render history · "+data.total+" version(s)";panel.append(heading);
    const note=document.createElement("p");note.textContent="Previewing a version never changes the active render or YouTube publishing selection.";panel.append(note);
+   if(data.items.length>=2){
+    const compare=document.createElement("div");compare.style.display="flex";compare.style.flexWrap="wrap";compare.style.alignItems="center";compare.style.gap="8px";compare.style.margin="12px 0";
+    const left=document.createElement("select"),right=document.createElement("select");left.setAttribute("aria-label","First render version");right.setAttribute("aria-label","Second render version");
+    for(const item of data.items){for(const select of [left,right]){const option=document.createElement("option");option.value=item.id;option.textContent="Render v"+item.version+(item.isLatest?" · Latest":"");select.append(option);}}
+    left.value=data.items[1].id;right.value=data.items[0].id;
+    const compareButton=document.createElement("button");compareButton.type="button";compareButton.className="text-button";compareButton.textContent="Compare versions";
+    compare.append(left,right,compareButton);panel.append(compare);
+    const compareArea=document.createElement("div");compareArea.id="clip-render-comparison";compareArea.style.display="grid";compareArea.style.gridTemplateColumns="repeat(auto-fit,minmax(min(100%,240px),1fr))";compareArea.style.gap="12px";compareArea.style.margin="12px 0";panel.append(compareArea);
+    compareButton.addEventListener("click",()=>{
+     const a=data.items.find(item=>item.id===left.value),b=data.items.find(item=>item.id===right.value);
+     if(!a||!b||a.id===b.id){compareArea.replaceChildren();const warning=document.createElement("p");warning.textContent="Choose two different render versions to compare.";compareArea.append(warning);return;}
+     compareArea.replaceChildren();
+     for(const item of [a,b]){
+      const card=document.createElement("div");card.style.minWidth="0";card.style.padding="10px";card.style.border="1px solid var(--border,rgba(255,255,255,.14))";card.style.borderRadius="12px";
+      const label=document.createElement("strong");label.textContent="Render v"+item.version+(item.isLatest?" · LATEST":"");card.append(label);
+      const player=document.createElement("video");player.controls=true;player.playsInline=true;player.preload="metadata";player.src=item.previewUrl;player.style.display="block";player.style.width="100%";player.style.maxHeight="min(65vh,680px)";player.style.aspectRatio="9 / 16";player.style.objectFit="contain";player.style.background="#08090d";player.style.marginTop="8px";card.append(player);
+      const meta=document.createElement("p");meta.style.margin="6px 0 0";meta.textContent=(item.sizeBytes/1048576).toFixed(1)+" MB · "+(item.createdAt?new Date(item.createdAt).toLocaleString():"Date unavailable");card.append(meta);compareArea.append(card);
+     }
+    });
+   }
    if(!data.items.length){const empty=document.createElement("p");empty.textContent="No saved renders yet. Render a clip to start its history.";panel.append(empty);}
    for(const item of data.items){
     const row=document.createElement("div");row.style.display="flex";row.style.flexWrap="wrap";row.style.alignItems="center";row.style.justifyContent="space-between";row.style.gap="10px";row.style.padding="10px 0";row.style.borderTop="1px solid var(--border,rgba(255,255,255,.12))";
