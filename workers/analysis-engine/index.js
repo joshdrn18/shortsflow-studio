@@ -224,34 +224,30 @@ async function retryTransientJob(env, job, message) {
   return true;
 }
 
-async function reserveAiBudget(env, seconds) {
+async function reserveAiBudget(env, reservationKey, seconds) {
   const usageDate = new Date().toISOString().slice(0, 10);
   const neurons = (seconds / 60) * NEURONS_PER_AUDIO_MINUTE;
-  const result = await env.DB.prepare(
-    `INSERT INTO ai_usage_daily (usage_date, neurons_reserved, audio_seconds_reserved, updated_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(usage_date) DO UPDATE SET
-       neurons_reserved = neurons_reserved + excluded.neurons_reserved,
-       audio_seconds_reserved = audio_seconds_reserved + excluded.audio_seconds_reserved,
-       updated_at = excluded.updated_at
-     WHERE neurons_reserved + excluded.neurons_reserved <= ?`
-  ).bind(usageDate, neurons, Math.ceil(seconds), new Date().toISOString(), DAILY_NEURON_BUDGET).run();
-  return Number(result.meta?.changes || 0) > 0;
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO ai_usage_reservations (reservation_key, usage_date, neurons, audio_seconds, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).bind(reservationKey, usageDate, neurons, Math.ceil(seconds), now).run();
+  const reservation = await env.DB.prepare(
+    "SELECT reservation_key FROM ai_usage_reservations WHERE reservation_key = ?"
+  ).bind(reservationKey).first();
+  return Boolean(reservation);
 }
 
-async function reserveTextBudget(env, inputTokens, outputTokens) {
+async function reserveTextBudget(env, reservationKey, inputTokens, outputTokens) {
   const usageDate = new Date().toISOString().slice(0, 10);
   const neurons = (Math.max(0, inputTokens) * 4119 + Math.max(0, outputTokens) * 34868) / 1000000 + 20;
   const now = new Date().toISOString();
-  const result = await env.DB.prepare(
-    `INSERT INTO ai_usage_daily (usage_date, neurons_reserved, audio_seconds_reserved, updated_at)
-     VALUES (?, ?, 0, ?)
-     ON CONFLICT(usage_date) DO UPDATE SET
-       neurons_reserved = neurons_reserved + excluded.neurons_reserved,
-       updated_at = excluded.updated_at
-     WHERE neurons_reserved + excluded.neurons_reserved <= ?`
-  ).bind(usageDate, neurons, now, DAILY_NEURON_BUDGET).run();
-  return Number(result.meta?.changes || 0) > 0;
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO ai_usage_reservations (reservation_key, usage_date, neurons, audio_seconds, created_at) VALUES (?, ?, ?, 0, ?)"
+  ).bind(reservationKey, usageDate, neurons, now).run();
+  const reservation = await env.DB.prepare(
+    "SELECT reservation_key FROM ai_usage_reservations WHERE reservation_key = ?"
+  ).bind(reservationKey).first();
+  return Boolean(reservation);
 }
 
 async function ensureTranscript(env, job, payload) {
@@ -366,7 +362,7 @@ async function processNextJob(env) {
       throw new Error("No usable audio track was found in this source video.");
     }
 
-    const withinBudget = await reserveAiBudget(env, chunkDuration);
+    const withinBudget = await reserveAiBudget(env, `audio:${job.id}:${Number(job.attempts || 0)}:${chunkIndex}`, chunkDuration);
     if (!withinBudget) {
       const nextUtcDay = new Date();
       nextUtcDay.setUTCHours(24, 0, 5, 0);
@@ -466,11 +462,11 @@ async function processClipDiscovery(env, job) {
   }
   const candidates = [];
   const windowDiagnostics = [];
-  for (const window of windows) {
+  for (let windowIndex = 0; windowIndex < windows.length; windowIndex++) {\n    const window = windows[windowIndex];
     const timeline = window.words.map(w => "[" + Number(w.start).toFixed(2) + "-" + Number(w.end).toFixed(2) + "] " + String(w.word || "")).join(" ");
     const prompt = "Find 1 to 3 of the strongest distinct short-form clips inside this transcript window. Each must be 15–60 seconds, start with a compelling hook, make sense on its own, and end on a complete thought, joke, reveal, or payoff. Prefer meaningful moments; avoid greetings, filler, repeated lines and incomplete sentences. Use ONLY the supplied absolute word timestamps. Return fewer only if this window truly has fewer viable moments. Rank strongest first. Return compact JSON only: {\"candidates\":[{\"startSeconds\":12.3,\"endSeconds\":42.8,\"title\":\"Specific engaging title\",\"hook\":\"Opening line\",\"reason\":\"Why this moment works\",\"caption\":\"Short caption\",\"hashtags\":[\"#shorts\",\"#topic\"],\"score\":91}]}. Full source duration: " + duration.toFixed(2) + " seconds. Search window: " + window.from.toFixed(2) + "–" + window.to.toFixed(2) + " seconds. Transcript language: " + (transcript.language || "auto-detected") + ". Timestamped transcript: " + timeline;
     const inputTokens = Math.ceil((system.length + prompt.length) / 3);
-    if (!await reserveTextBudget(env, inputTokens, 1100)) {
+    if (!await reserveTextBudget(env, `discovery:${job.id}:${Number(job.attempts || 0)}:${windowIndex}`, inputTokens, 1100)) {
       throw new Error("Daily AI safety budget reached during clip discovery. Retry after the UTC reset.");
     }
     let result = await env.AI.run(CLIP_MODEL, {
@@ -480,7 +476,7 @@ async function processClipDiscovery(env, job) {
     let parsed = parseClipSelectorResponse(result);
     if (!Array.isArray(parsed) || !parsed.length) {
       const retry = prompt + "\\nReturn only a valid compact JSON object with a candidates array. Keep every field short.";
-      if (await reserveTextBudget(env, Math.ceil(retry.length / 3), 700)) {
+      if (await reserveTextBudget(env, `discovery-repair:${job.id}:${Number(job.attempts || 0)}:${windowIndex}`, Math.ceil(retry.length / 3), 700)) {
         result = await env.AI.run(CLIP_MODEL, {
           messages: [{ role: "system", content: system }, { role: "user", content: retry }],
           max_tokens: 700, temperature: 0.1, response_format: { type: "json_object" }
@@ -668,7 +664,7 @@ async function processBrowserAudioChunk(request, env) {
     transcript=await env.DB.prepare("SELECT id FROM source_transcripts WHERE id=? AND workspace_id=? AND source_video_id=? AND status='processing'").bind(transcriptId,workspaceId,sourceId).first();
     if(!transcript)return json({ok:false,error:"Transcription session expired. Start analysis again."},409);
   }
-  const withinBudget=await reserveAiBudget(env,Math.min(60,Math.max(1,duration-chunkIndex*60)));
+  const withinBudget=await reserveAiBudget(env,`browser-audio:${transcript.id}:${chunkIndex}`,Math.min(60,Math.max(1,duration-chunkIndex*60)));
   if(!withinBudget)return json({ok:false,error:"Daily AI safety budget reached. Retry after the UTC reset."},429);
   const result=await env.AI.run(MODEL,{audio:Array.from(audio)});
   const current=await env.DB.prepare("SELECT transcript_text,segments_json FROM source_transcripts WHERE id=? AND workspace_id=?").bind(transcript.id,workspaceId).first();
