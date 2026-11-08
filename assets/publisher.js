@@ -91,7 +91,7 @@
  async function load(){
   ensure();if(state.loading)return;state.loading=true;
   try{
-   const [pub,review,brands]=await Promise.all([fetch("/api/youtube",{headers:{accept:"application/json"}}),fetch("/api/review",{headers:{accept:"application/json"}}),fetch("/api/workspace/brand-kit",{headers:{accept:"application/json"}})]);
+   const [pub,review]=await Promise.all([fetch("/api/youtube",{headers:{accept:"application/json"}}),fetch("/api/review",{headers:{accept:"application/json"}})]);
    const p=await pub.json();if(!pub.ok||!p.ok)throw new Error(p.error||"Could not load publisher.");
    const r=await review.json();if(!review.ok||!r.ok)throw new Error(r.error||"Could not load approved renders.");
    state.connection=p.connection;state.jobs=p.jobs||[];state.eligible=(r.items||[]).filter(x=>x.decision==="approved");
