@@ -1,5 +1,5 @@
 (() => {
- const $=s=>document.querySelector(s);let busy=false;
+ const $=s=>document.querySelector(s);let busy=false,activeCancel=null;
  function drawCover(ctx,v,x,y,w,h){const sw=v.videoWidth,sh=v.videoHeight;if(!sw||!sh||w<=0||h<=0)return;const ratio=w/h,sr=sw/sh;let sx=0,sy=0,cw=sw,ch=sh;if(sr>ratio){cw=sh*ratio;sx=(sw-cw)/2;}else{ch=sw/ratio;sy=(sh-ch)/2;}ctx.drawImage(v,sx,sy,cw,ch,x,y,w,h);}
  function drawVerticalComposition(ctx,v,w,h){
   const sw=v.videoWidth,sh=v.videoHeight;if(!sw||!sh)return;
@@ -103,12 +103,13 @@
    v.pause();await seek(v,start);if(task.cancelled)return;const started=performance.now();let last=0;
    const stop=()=>{if(stopped)return;stopped=true;cancelAnimationFrame(frame);v.pause();if(recorder&&recorder.state!=="inactive")recorder.stop();};
    const draw=()=>{if(stopped)return;const videoBox=drawVerticalComposition(ctx,v,1080,1920);const t=v.currentTime-start;drawWords(ctx,sub.words||[],t,sub.config||{},1080,1920,videoBox);drawMark(ctx,settings.settings||{},1080,1920);if(performance.now()-last>350){msg.textContent="Rendering in this browser… "+Math.round(Math.min(99,Math.max(0,t/duration*100)))+"%";last=performance.now();}if(v.currentTime>=end||v.ended){stop();return;}frame=requestAnimationFrame(draw);};
-   recorder.start(1000);await v.play();frame=requestAnimationFrame(draw);const timeout=setTimeout(stop,(duration+10)*1000);await done;clearTimeout(timeout);
+   recorder.start(1000);await v.play();frame=requestAnimationFrame(draw);const timeout=setTimeout(stop,(duration+10)*1000);await done;clearTimeout(timeout);if(task.cancelled)return;
    if(performance.now()-started<500)throw new Error("The source did not play long enough. Retry.");
    const blob=new Blob(chunks,{type:"video/webm"});if(blob.size<1024)throw new Error("Render output is empty. Check source playback and retry.");if(blob.size>90*1024*1024)throw new Error("Render exceeds the 90 MB limit. Try a shorter clip.");
+   if(task.cancelled)return;
    msg.textContent="Uploading render to private R2 storage…";
    const result=await new Promise((resolve,reject)=>{
-    const xhr=new XMLHttpRequest();xhr.open("POST","/api/clips/"+encodeURIComponent(clip.id)+"/render");xhr.withCredentials=true;xhr.timeout=300000;
+    xhr=new XMLHttpRequest();xhr.open("POST","/api/clips/"+encodeURIComponent(clip.id)+"/render");xhr.withCredentials=true;xhr.timeout=300000;
     xhr.setRequestHeader("Content-Type","video/webm");xhr.setRequestHeader("X-Metadata-Version",String(mv));
     xhr.upload.addEventListener("progress",event=>{
      if(event.lengthComputable){const percent=Math.round(event.loaded/event.total*100),sent=(event.loaded/1048576).toFixed(1),total=(event.total/1048576).toFixed(1);msg.textContent=percent>=100?"Upload complete. Verifying the video in private R2 storage…":"Uploading to private R2 storage… "+percent+"% · "+sent+" / "+total+" MB";}
@@ -124,12 +125,13 @@
     xhr.addEventListener("abort",()=>reject(new Error("R2 upload was cancelled.")));
     xhr.send(blob);msg.textContent="Connecting to private R2 storage…";
    });
+   if(task.cancelled)return;
    msg.replaceChildren();
    msg.append(document.createTextNode("Render saved · WebM · "+(result.asset.sizeBytes/1048576).toFixed(1)+" MB · "));
    const link=document.createElement("a");link.href=result.asset.url;link.target="_blank";link.rel="noopener";link.textContent="Open rendered video ↗";msg.append(link);
    btn.textContent="Render again";
-  }catch(e){msg.textContent=e.message||"Render failed. Retry.";btn.textContent="Retry render";}
-  finally{stopped=true;cancelAnimationFrame(frame);if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(sourceStream)sourceStream.getTracks().forEach(t=>t.stop());cancelBtn.remove();if(activeCancel===task)activeCancel=null;busy=false;btn.disabled=false;}
+  }catch(e){if(!task.cancelled){msg.textContent=e.message||"Render failed. Retry.";btn.textContent="Retry render";}}
+  finally{stopped=true;cancelAnimationFrame(frame);if(xhr&&xhr.readyState!==XMLHttpRequest.DONE){try{xhr.abort();}catch{}}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(sourceStream)sourceStream.getTracks().forEach(t=>t.stop());cancelBtn.remove();if(activeCancel===task)activeCancel=null;busy=false;btn.disabled=false;}
  }
  document.addEventListener("click",e=>{if(e.target.closest("#clip-render-btn"))render();});
 })();
