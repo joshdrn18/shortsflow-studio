@@ -3,6 +3,7 @@
   const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
   const time = value => { const seconds=Math.max(0,Math.floor(Number(value)||0)); return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0"); };
   let activeClip=null, clipStart=0, clipEnd=0, busy=false;
+  const selectedClipIds = new Set();
 
   function ensurePanel() {
     if ($("#clips-workspace")) return;
