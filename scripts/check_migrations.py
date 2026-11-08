@@ -4,7 +4,7 @@ import sqlite3
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
 
-expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql", "0016_workspace_brand_profiles.sql"]
+expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql", "0016_workspace_brand_profiles.sql", "0017_brand_profile_metadata.sql"]
 actual = [path.name for path in MIGRATIONS]
 if actual != expected:
     raise SystemExit(f"Unexpected migration sequence: {actual}")
@@ -151,6 +151,10 @@ reservation = connection.execute(
 ).fetchone()
 if usage != (100.0, 60) or reservation is not None:
     raise SystemExit(f"AI daily budget guard failed: usage={usage}, reservation={reservation}")
+
+brand_profile_columns = {row[1] for row in connection.execute("PRAGMA table_info(workspace_brand_profiles)")}
+if "metadata_config_json" not in brand_profile_columns:
+    raise SystemExit("workspace_brand_profiles.metadata_config_json is missing")
 
 # Multiple Brand Profiles persist separately and can be activated.
 connection.execute(
