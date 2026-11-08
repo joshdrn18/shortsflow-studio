@@ -18,7 +18,9 @@ function cleanConfig(value) {
     background: v.background !== false,
     edgeOffset: Math.max(5, Math.min(25, Math.round(Number(v.edgeOffset) || 9))),
     fontWeight: [600, 700, 800, 900].includes(Number(v.fontWeight)) ? Number(v.fontWeight) : 900,
-    highlightStyle: ["color", "pill", "underline"].includes(v.highlightStyle) ? v.highlightStyle : "color"
+    highlightStyle: ["color", "pill", "underline"].includes(v.highlightStyle) ? v.highlightStyle : "color",
+    animation: ["none", "pop", "fade", "slide"].includes(v.animation) ? v.animation : "pop",
+    animationDuration: Math.max(80, Math.min(300, Math.round(Number(v.animationDuration) || 160)))
   };
 }
 
