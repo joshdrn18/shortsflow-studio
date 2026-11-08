@@ -1,5 +1,21 @@
 import { json, getSessionUser, readJson } from "../_lib/auth.js";
 const ID=/^[0-9a-f-]{36}$/i;
+async function restoreClipAfterPublishing(env,clipId,workspaceId,now){
+ return env.DB.prepare(`UPDATE clips SET status=CASE WHEN EXISTS(
+  SELECT 1 FROM clip_metadata m
+  JOIN clip_assets a ON a.clip_id=m.clip_id AND a.asset_type='render'
+   AND a.version=(SELECT MAX(x.version) FROM clip_assets x WHERE x.clip_id=m.clip_id AND x.asset_type='render')
+   AND a.metadata_version=m.version
+  JOIN clip_reviews r ON r.id=(SELECT x.id FROM clip_reviews x WHERE x.clip_id=m.clip_id
+   AND x.render_asset_id=a.id AND x.metadata_version=m.version ORDER BY x.reviewed_at DESC,x.id DESC LIMIT 1)
+   AND r.decision='approved'
+  WHERE m.clip_id=clips.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=clips.id)
+ ) THEN 'approved' ELSE 'editing' END,updated_at=?
+ WHERE id=? AND workspace_id=? AND status='publishing'
+ AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.clip_id=clips.id AND p.platform='youtube'
+  AND p.status IN ('queued','uploading','processing','published'))`).bind(now,clipId,workspaceId).run();
+}
+
 export async function onRequestGet({request,env}){
  const user=await getSessionUser(request,env);if(!user?.workspace?.id)return json({ok:false,error:"Authentication required."},401);
  try{
@@ -54,12 +70,35 @@ export async function onRequestDelete({request,env}){
  const job=await env.DB.prepare("SELECT p.id,p.status FROM publishing_jobs p JOIN clips c ON c.id=p.clip_id WHERE p.id=? AND p.platform='youtube' AND c.workspace_id=?").bind(id,user.workspace.id).first();
  if(!job)return json({ok:false,error:"Publishing job not found."},404);
  if(job.status==="queued"){
-  await env.DB.prepare("UPDATE publishing_jobs SET status='cancelled',updated_at=? WHERE id=? AND status='queued'").bind(new Date().toISOString(),id).run();
+  const now=new Date().toISOString();
+  const results=await env.DB.batch([
+   env.DB.prepare("UPDATE publishing_jobs SET status='cancelled',updated_at=? WHERE id=? AND status='queued' AND platform='youtube'").bind(now,id),
+   env.DB.prepare(`UPDATE clips SET status=CASE WHEN EXISTS(
+    SELECT 1 FROM clip_metadata m JOIN clip_assets a ON a.clip_id=m.clip_id AND a.asset_type='render'
+     AND a.version=(SELECT MAX(x.version) FROM clip_assets x WHERE x.clip_id=m.clip_id AND x.asset_type='render') AND a.metadata_version=m.version
+    JOIN clip_reviews r ON r.id=(SELECT x.id FROM clip_reviews x WHERE x.clip_id=m.clip_id AND x.render_asset_id=a.id AND x.metadata_version=m.version ORDER BY x.reviewed_at DESC,x.id DESC LIMIT 1) AND r.decision='approved'
+    WHERE m.clip_id=clips.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=clips.id)
+   ) THEN 'approved' ELSE 'editing' END,updated_at=?
+   WHERE id=(SELECT clip_id FROM publishing_jobs WHERE id=? AND status='cancelled') AND workspace_id=?
+    AND status='publishing' AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.clip_id=clips.id AND p.platform='youtube' AND p.status IN ('queued','uploading','processing','published'))`).bind(now,id,user.workspace.id)
+  ]);
+  if(!results[0]?.meta?.changes)return json({ok:false,error:"This job changed state. Refresh the queue and try again."},409);
   return json({ok:true,cancelled:true});
  }
  if(job.status==="failed"){
-  const result=await env.DB.prepare("DELETE FROM publishing_jobs WHERE id=? AND status='failed' AND platform='youtube'").bind(id).run();
-  if(!result.meta?.changes)return json({ok:false,error:"This job changed state. Refresh the queue and try again."},409);
+  const now=new Date().toISOString();
+  const results=await env.DB.batch([
+   env.DB.prepare("DELETE FROM publishing_jobs WHERE id=? AND status='failed' AND platform='youtube'").bind(id),
+   env.DB.prepare(`UPDATE clips SET status=CASE WHEN EXISTS(
+    SELECT 1 FROM clip_metadata m JOIN clip_assets a ON a.clip_id=m.clip_id AND a.asset_type='render'
+     AND a.version=(SELECT MAX(x.version) FROM clip_assets x WHERE x.clip_id=m.clip_id AND x.asset_type='render') AND a.metadata_version=m.version
+    JOIN clip_reviews r ON r.id=(SELECT x.id FROM clip_reviews x WHERE x.clip_id=m.clip_id AND x.render_asset_id=a.id AND x.metadata_version=m.version ORDER BY x.reviewed_at DESC,x.id DESC LIMIT 1) AND r.decision='approved'
+    WHERE m.clip_id=clips.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=clips.id)
+   ) THEN 'approved' ELSE 'editing' END,updated_at=?
+   WHERE id=(SELECT clip_id FROM clips c JOIN publishing_jobs p ON p.clip_id=c.id WHERE p.id=? AND p.platform='youtube') AND workspace_id=?
+    AND status='publishing' AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.clip_id=clips.id AND p.platform='youtube' AND p.status IN ('queued','uploading','processing','published'))`).bind(now,id,user.workspace.id)
+  ]);
+  if(!results[0]?.meta?.changes)return json({ok:false,error:"This job changed state. Refresh the queue and try again."},409);
   return json({ok:true,deleted:true});
  }
  return json({ok:false,error:"Only queued jobs can be cancelled or failed jobs can be deleted."},409);
