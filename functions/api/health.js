@@ -17,6 +17,7 @@ export async function onRequestGet({ env }) {
     version: "0.1.0",
     database,
     databaseConfigured: Boolean(env.DB),
+    mediaConfigured: Boolean(env.MEDIA),
     ...(databaseError ? { databaseError } : {}),
     timestamp: new Date().toISOString()
   }, {
