@@ -120,7 +120,7 @@ export async function onRequestDelete({ request, env }) {
 
     const ownedPlaceholders = ids.map(() => "?").join(",");
     const activePublishing = await env.DB.prepare(
-      `SELECT id FROM publishing_jobs WHERE clip_id IN (${ownedPlaceholders}) AND status IN ('uploading','processing') LIMIT 1`
+      `SELECT id FROM publishing_jobs WHERE clip_id IN (${ownedPlaceholders}) AND status IN ('queued','uploading','processing') LIMIT 1`
     ).bind(...ids).first();
     if (activePublishing) {
       return json({ ok: false, error: "At least one selected clip is currently being published. Wait for publishing to finish before deleting it." }, 409);
