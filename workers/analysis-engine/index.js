@@ -575,17 +575,53 @@ async function processClipDiscovery(env, job) {
       (/[.!?]/.test(caption) ? 0.15 : 0) +
       (caption.toLowerCase().includes(normalizedTitle) && normalizedTitle.length > 0 ? 0 : 0.2);
     const payoffQuality = payoffPattern.test([hook, reason, caption].join(" ")) ? 1 : 0.35;
+    // Score the actual timestamped transcript too. This discourages clips that
+    // look attractive in metadata but contain too little speech, excessive
+    // repetition, or an abrupt ending with no complete thought.
+    let transcriptQuality = 0.5;
+    const rawStart = Number(candidate.startSeconds ?? candidate.start_seconds);
+    const rawEnd = Number(candidate.endSeconds ?? candidate.end_seconds);
+    if (Number.isFinite(rawStart) && Number.isFinite(rawEnd) && rawEnd > rawStart) {
+      const windowStart = Number(candidate.__windowStart || 0);
+      const windowEnd = Number(candidate.__windowEnd || duration);
+      const absoluteStart = windowStart > 0 && rawStart < windowStart - 3 && rawEnd <= (windowEnd - windowStart) + 3
+        ? rawStart + windowStart : rawStart;
+      const absoluteEnd = absoluteStart === rawStart ? rawEnd : rawEnd + windowStart;
+      const spokenWords = words.filter(word => word.start >= absoluteStart && word.end <= absoluteEnd);
+      const spokenText = spokenWords.map(word => word.word).join(" ").trim();
+      const wordCount = spokenWords.length;
+      const clipSeconds = absoluteEnd - absoluteStart;
+      const wordsPerSecond = wordCount / Math.max(1, clipSeconds);
+      const densityQuality = wordsPerSecond >= 1.2 && wordsPerSecond <= 4.5
+        ? 1 : wordsPerSecond >= 0.7 && wordsPerSecond <= 5.5 ? 0.65 : 0.25;
+      const normalizedWords = spokenWords.map(word => word.word.toLowerCase().replace(/[^\\p{L}\\p{N}]/gu, "")).filter(Boolean);
+      const uniqueRatio = normalizedWords.length
+        ? new Set(normalizedWords).size / normalizedWords.length : 0;
+      const repetitionQuality = uniqueRatio >= 0.48 ? 1 : uniqueRatio >= 0.32 ? 0.65 : 0.3;
+      const firstWords = spokenWords.slice(0, 12).map(word => word.word).join(" ");
+      const lastWords = spokenWords.slice(-12).map(word => word.word).join(" ");
+      const hasOpeningSignal = /[?!:]|\\b(why|how|what|never|because|secret|watch|look|imagine|ternyata|kenapa|bagaimana|mengapa|rahasia|lihat|bayangkan)\\b/i.test(firstWords);
+      const hasClosingSignal = /[.!?…]["')\\]]?\\s*$/.test(lastWords) ||
+        /\\b(so|therefore|that's why|in the end|finally|turns out|jadi|makanya|akhirnya|ternyata|kesimpulannya)\\b/i.test(lastWords);
+      const openingQuality = hasOpeningSignal ? 1 : 0.55;
+      const closingQuality = hasClosingSignal ? 1 : 0.4;
+      const lengthQuality = wordCount >= 28 ? 1 : wordCount >= 18 ? 0.7 : 0.3;
+      transcriptQuality = densityQuality * 0.25 + repetitionQuality * 0.20 +
+        openingQuality * 0.20 + closingQuality * 0.20 + lengthQuality * 0.15;
+    }
     const qualityScore = 100 * (
-      hookQuality * 0.25 +
-      contextQuality * 0.25 +
-      titleQuality * 0.15 +
-      captionQuality * 0.15 +
-      payoffQuality * 0.20
+      hookQuality * 0.20 +
+      contextQuality * 0.20 +
+      titleQuality * 0.10 +
+      captionQuality * 0.10 +
+      payoffQuality * 0.15 +
+      transcriptQuality * 0.25
     );
     // Keep the model's score as the persisted AI score, but rank with a blended
-    // score so a strong hook, clear context and satisfying payoff matter too.
-    const rankScore = score * 0.65 + qualityScore * 0.35;
-    return { candidate, score, qualityScore: Math.round(qualityScore), rankScore: Math.round(rankScore) };
+    // score so transcript substance and a self-contained ending influence selection.
+    const rankScore = score * 0.60 + qualityScore * 0.40;
+    return { candidate, score, qualityScore: Math.round(qualityScore),
+      transcriptQuality: Math.round(transcriptQuality * 100), rankScore: Math.round(rankScore) };
   }).sort((a,b) => b.rankScore - a.rankScore || b.score - a.score);
 
   for (const item of ranked) {
