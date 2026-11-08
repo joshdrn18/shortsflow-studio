@@ -103,7 +103,7 @@ export async function onRequestPut({request,env}) {
       await setLegacyActive(env.DB,ctx.workspaceId,profile);
       return json({ok:true,profile});
     }
-    const id=String(body.profileId||"");
+    let id=String(body.profileId||"");
     if(body.action==="metadata") {
       if(!id)return json({ok:false,error:"Choose a Brand Profile first."},400);
       if(!validObject(body.metadata))return json({ok:false,error:"Metadata template must be an object."},400);
