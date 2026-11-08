@@ -16,7 +16,9 @@
     $("#subtitle-brand-save").addEventListener("click",saveBrandKit);
     $("#subtitle-brand-load").addEventListener("click",loadBrandKit);
     $("#subtitle-brand-apply").addEventListener("click",applyBrandKit);
-    $("#subtitle-brand-profile").addEventListener("change",selectBrandProfile);\n    $("#subtitle-brand-new").addEventListener("click",createBrandProfile);\n    $("#subtitle-brand-delete").addEventListener("click",deleteBrandProfile);
+    $("#subtitle-brand-profile").addEventListener("change",selectBrandProfile);
+    $("#subtitle-brand-new").addEventListener("click",createBrandProfile);
+    $("#subtitle-brand-delete").addEventListener("click",deleteBrandProfile);
     $("#subtitle-save").addEventListener("click",save);
     video.addEventListener("timeupdate",render);
     video.addEventListener("seeked",render);
