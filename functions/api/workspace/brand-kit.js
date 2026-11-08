@@ -17,6 +17,7 @@ function shape(row) {
     name: row.profile_name,
     subtitle: parseObject(row.subtitle_config_json),
     watermark: parseObject(row.watermark_config_json),
+    metadata: parseObject(row.metadata_config_json),
     updatedAt: row.updated_at
   };
 }
@@ -43,7 +44,7 @@ export async function onRequestGet({request,env}) {
   if (ctx.response) return ctx.response;
   try {
     const [rows, legacy] = await Promise.all([
-      env.DB.prepare("SELECT id,profile_name,subtitle_config_json,watermark_config_json,updated_at FROM workspace_brand_profiles WHERE workspace_id=? ORDER BY updated_at DESC,created_at DESC").bind(ctx.workspaceId).all(),
+      env.DB.prepare("SELECT id,profile_name,subtitle_config_json,watermark_config_json,metadata_config_json,updated_at FROM workspace_brand_profiles WHERE workspace_id=? ORDER BY updated_at DESC,created_at DESC").bind(ctx.workspaceId).all(),
       env.DB.prepare("SELECT kit_name,subtitle_config_json,watermark_config_json,active_profile_id,updated_at FROM workspace_brand_kits WHERE workspace_id=?").bind(ctx.workspaceId).first()
     ]);
     const profiles = (rows.results || []).map(shape);
@@ -52,7 +53,7 @@ export async function onRequestGet({request,env}) {
     const active = profiles.find(p=>p.id===activeId) || null;
     const fallback = !profiles.length && legacy ? {
       id:null,name:legacy.kit_name,subtitle:parseObject(legacy.subtitle_config_json),
-      watermark:parseObject(legacy.watermark_config_json),updatedAt:legacy.updated_at
+      watermark:parseObject(legacy.watermark_config_json),metadata:{},updatedAt:legacy.updated_at
     } : null;
     return json({ok:true,profiles,activeProfileId:activeId,kit:active||fallback});
   } catch {
@@ -67,15 +68,16 @@ export async function onRequestPost({request,env}) {
   const name = String(body.name || "New Brand").trim().slice(0,40) || "New Brand";
   const subtitle = validObject(body.subtitle) ? body.subtitle : {};
   const watermark = validObject(body.watermark) ? body.watermark : {};
-  const subtitleJson = JSON.stringify(subtitle), watermarkJson = JSON.stringify(watermark);
-  if (subtitleJson.length>12000 || watermarkJson.length>3000) return json({ok:false,error:"Brand Profile settings are too large."},413);
+  const metadata = validObject(body.metadata) ? body.metadata : {};
+  const subtitleJson = JSON.stringify(subtitle), watermarkJson = JSON.stringify(watermark), metadataJson = JSON.stringify(metadata);
+  if (subtitleJson.length>12000 || watermarkJson.length>3000 || metadataJson.length>8000) return json({ok:false,error:"Brand Profile settings are too large."},413);
   try {
     const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM workspace_brand_profiles WHERE workspace_id=?").bind(ctx.workspaceId).first();
     if (Number(count?.total||0)>=20) return json({ok:false,error:"A workspace can have up to 20 Brand Profiles."},409);
     const id = crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO workspace_brand_profiles (id,workspace_id,profile_name,subtitle_config_json,watermark_config_json) VALUES (?,?,?,?,?)")
-      .bind(id,ctx.workspaceId,name,subtitleJson,watermarkJson).run();
-    const profile = {id,name,subtitle,watermark};
+    await env.DB.prepare("INSERT INTO workspace_brand_profiles (id,workspace_id,profile_name,subtitle_config_json,watermark_config_json,metadata_config_json) VALUES (?,?,?,?,?,?)")
+      .bind(id,ctx.workspaceId,name,subtitleJson,watermarkJson,metadataJson).run();
+    const profile = {id,name,subtitle,watermark,metadata};
     await setLegacyActive(env.DB,ctx.workspaceId,profile);
     return json({ok:true,profile});
   } catch {
@@ -102,15 +104,15 @@ export async function onRequestPut({request,env}) {
     if (subtitleJson.length>12000 || watermarkJson.length>3000) return json({ok:false,error:"Brand Profile settings are too large."},413);
     let id = String(body.profileId||"");
     if (id) {
-      const result = await env.DB.prepare("UPDATE workspace_brand_profiles SET profile_name=?,subtitle_config_json=?,watermark_config_json=?,updated_at=datetime('now') WHERE workspace_id=? AND id=?")
-        .bind(name,subtitleJson,watermarkJson,ctx.workspaceId,id).run();
+      const result = await env.DB.prepare("UPDATE workspace_brand_profiles SET profile_name=?,subtitle_config_json=?,watermark_config_json=?,metadata_config_json=?,updated_at=datetime('now') WHERE workspace_id=? AND id=?")
+        .bind(name,subtitleJson,watermarkJson,metadataJson,ctx.workspaceId,id).run();
       if (!result.meta?.changes) return json({ok:false,error:"Brand Profile not found."},404);
     } else {
       id=crypto.randomUUID();
       await env.DB.prepare("INSERT INTO workspace_brand_profiles (id,workspace_id,profile_name,subtitle_config_json,watermark_config_json) VALUES (?,?,?,?,?)")
         .bind(id,ctx.workspaceId,name,subtitleJson,watermarkJson).run();
     }
-    const profile={id,name,subtitle:body.subtitle,watermark:body.watermark};
+    const profile={id,name,subtitle:body.subtitle,watermark:body.watermark,metadata};
     await setLegacyActive(env.DB,ctx.workspaceId,profile);
     return json({ok:true,profile});
   } catch {
