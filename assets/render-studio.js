@@ -100,9 +100,38 @@
   }catch(error){panel.replaceChildren();const message=document.createElement("p");message.textContent=error.message;panel.append(message);}
   finally{button.disabled=false;}
  }
+ async function showRenderHistory(clipId,button){
+  let panel=$("#clip-render-history-panel");if(panel&&!panel.hidden){panel.hidden=true;return;}
+  if(!panel){panel=document.createElement("section");panel.id="clip-render-history-panel";panel.className="panel";panel.style.marginTop="12px";button.insertAdjacentElement("afterend",panel);}
+  panel.hidden=false;panel.replaceChildren();const loading=document.createElement("p");loading.textContent="Loading render history…";panel.append(loading);button.disabled=true;
+  try{
+   const response=await fetch("/api/clips/"+encodeURIComponent(clipId)+"/render-history",{headers:{accept:"application/json"}}),data=await response.json();
+   if(!response.ok||!data.ok)throw new Error(data.error||"Could not load render history.");
+   panel.replaceChildren();const heading=document.createElement("strong");heading.textContent="Render history · "+data.total+" version(s)";panel.append(heading);
+   const note=document.createElement("p");note.textContent="Previewing a version never changes the active render or YouTube publishing selection.";panel.append(note);
+   if(!data.items.length){const empty=document.createElement("p");empty.textContent="No saved renders yet. Render a clip to start its history.";panel.append(empty);}
+   for(const item of data.items){
+    const row=document.createElement("div");row.style.display="flex";row.style.flexWrap="wrap";row.style.alignItems="center";row.style.justifyContent="space-between";row.style.gap="10px";row.style.padding="10px 0";row.style.borderTop="1px solid var(--border,rgba(255,255,255,.12))";
+    const info=document.createElement("div");info.style.minWidth="180px";info.style.flex="1";
+    const title=document.createElement("strong");title.textContent="Render v"+item.version+(item.isLatest?" · LATEST":"");info.append(title);
+    const meta=document.createElement("p");meta.style.margin="4px 0 0";meta.textContent=(item.sizeBytes/1048576).toFixed(1)+" MB · "+(item.createdAt?new Date(item.createdAt).toLocaleString():"Date unavailable");info.append(meta);
+    const status=document.createElement("p");status.style.margin="3px 0 0";status.textContent=item.isProtected?"Protected: "+item.protectedReasons.join(" · "):"Unused historical version";info.append(status);
+    const actions=document.createElement("div");actions.style.display="flex";actions.style.flexWrap="wrap";actions.style.gap="8px";
+    const play=document.createElement("button");play.type="button";play.className="text-button";play.textContent="Preview";play.addEventListener("click",()=>{
+     let player=panel.querySelector("#clip-render-history-preview");
+     if(!player){const wrap=document.createElement("div");wrap.style.margin="12px 0";player=document.createElement("video");player.id="clip-render-history-preview";player.controls=true;player.playsInline=true;player.preload="metadata";player.style.width="min(100%,360px)";player.style.maxHeight="65vh";player.style.display="block";wrap.append(player);panel.insertBefore(wrap,panel.children[1]||null);}
+     player.src=item.previewUrl;player.load();player.play().catch(()=>{});
+    });
+    const open=document.createElement("a");open.href=item.downloadUrl;open.target="_blank";open.rel="noopener";open.className="text-button";open.textContent="Download";actions.append(play,open);row.append(info,actions);panel.append(row);
+   }
+  }catch(error){panel.replaceChildren();const message=document.createElement("p");message.textContent=error.message;panel.append(message);}
+  finally{button.disabled=false;}
+ }
  function ensureCleanupButton(msg,clipId){
   let button=$("#clip-render-cleanup");if(!button){button=document.createElement("button");button.type="button";button.id="clip-render-cleanup";button.className="text-button";button.textContent="Manage old renders";button.style.marginTop="10px";msg.insertAdjacentElement("afterend",button);button.addEventListener("click",()=>manageOldRenders(button.dataset.clipId,button));}
   button.dataset.clipId=clipId;
+  let history=$("#clip-render-history");if(!history){history=document.createElement("button");history.type="button";history.id="clip-render-history";history.className="text-button";history.textContent="Render history";history.style.marginTop="10px";button.insertAdjacentElement("afterend",history);history.addEventListener("click",()=>showRenderHistory(history.dataset.clipId,history));}
+  history.dataset.clipId=clipId;
  }
  async function render(){
   if(busy)return;const clip=window.__shortsflowActiveClip,v=$("#clip-preview-video"),btn=$("#clip-render-btn"),msg=$("#clip-render-message");if(!clip?.id||!v||!btn)return;ensureCleanupButton(msg,clip.id);
