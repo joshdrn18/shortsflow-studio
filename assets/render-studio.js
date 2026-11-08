@@ -75,7 +75,7 @@
  }
  function drawMark(ctx,s,w,h){if(!s?.watermarkEnabled)return;const txt=String(s.watermarkText||"YOUR BRAND").slice(0,40),scale=s.watermarkScale==="large"?1.15:s.watermarkScale==="small"?.68:.88,font=Math.round(42*scale),pad=58;ctx.save();ctx.globalAlpha=Math.max(.1,Math.min(1,Number(s.watermarkOpacity)||.72));ctx.font=`800 ${font}px Manrope,Arial,sans-serif`;ctx.textBaseline="middle";const tw=ctx.measureText(txt).width,pos=s.watermarkPosition||"bottom-right";const x=pos.endsWith("left")?pad:pos.endsWith("center")||pos==="center"?(w-tw)/2:w-pad-tw;const y=pos.startsWith("top")?pad:pos==="center"?h/2:h-pad-font;ctx.shadowColor="#000";ctx.shadowBlur=12;ctx.fillStyle="#fff";ctx.fillText(txt,x,y);ctx.restore();}
  async function getJson(url){const r=await fetch(url,{headers:{accept:"application/json"}}),d=await r.json();if(!r.ok||!d.ok)throw new Error(d.error||"Could not load render settings.");return d;}
- async function seek(v,target){if(Math.abs(v.currentTime-target)<.04)return;await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error("Video seek timed out. Retry the render.")),12000);v.addEventListener("seeked",()=>{clearTimeout(timer);resolve();},{once:true});v.currentTime=target;});}
+ async function seek(v,target){if(Math.abs(v.currentTime-target)<.005&&!v.seeking)return;await new Promise((resolve,reject)=>{let settled=false;const finish=(error)=>{if(settled)return;settled=true;clearTimeout(timer);v.removeEventListener("seeked",onSeeked);v.removeEventListener("error",onError);error?reject(error):resolve();};const onSeeked=()=>finish();const onError=()=>finish(new Error("Could not seek to the exact clip start. Retry the render."));const timer=setTimeout(()=>finish(new Error("Video seek timed out. Retry the render.")),12000);v.addEventListener("seeked",onSeeked);v.addEventListener("error",onError);v.currentTime=target;});if(Math.abs(v.currentTime-target)>.08)throw new Error("The source video did not reach the requested start time. Retry the render.");}
  async function manageOldRenders(clipId,button){
   let panel=$("#clip-render-cleanup-panel");
   if(panel&&!panel.hidden){panel.hidden=true;return;}
@@ -160,7 +160,7 @@
   const changedCut=Math.abs(Number(window.__shortsflowClipStart)-Number(clip.startSeconds))>.05||Math.abs(Number(window.__shortsflowClipEnd)-Number(clip.endSeconds))>.05;
   const changedMeta=$("#clip-edit-title")?.value.trim()!==(clip.title||"")||$("#clip-edit-caption")?.value.trim()!==(clip.caption||"")||$("#clip-edit-hashtags")?.value.trim()!==(clip.hashtags||"")||$("#clip-edit-language")?.value.trim()!==(clip.language||"");
   if(changedCut||changedMeta||window.__shortsflowSubtitleDirty||window.__shortsflowWatermarkDirty){msg.textContent="Save your clip edits, subtitle style and watermark settings first, then render again.";return;}
-  busy=true;btn.disabled=true;btn.textContent="Preparing…";let recorder=null,canvasStream=null,sourceStream=null,frame=0,stopped=false,xhr=null;
+  busy=true;btn.disabled=true;btn.textContent="Preparing…";let recorder=null,canvasStream=null,sourceStream=null,frame=0,stopped=false,xhr=null,renderWatchdog=null;const originalPlaybackRate=v.playbackRate;
   const cancelBtn=document.createElement("button");cancelBtn.type="button";cancelBtn.id="clip-render-cancel";cancelBtn.className=btn.className;cancelBtn.textContent="Cancel render";cancelBtn.style.marginLeft="8px";btn.insertAdjacentElement("afterend",cancelBtn);
   const task={cancelled:false,cancel(){if(this.cancelled)return;this.cancelled=true;stopped=true;cancelAnimationFrame(frame);try{if(v&&!v.paused)v.pause();}catch{}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(xhr&&xhr.readyState!==XMLHttpRequest.DONE)xhr.abort();msg.textContent="Render cancelled. No new render was saved.";}};activeCancel=task;cancelBtn.addEventListener("click",()=>task.cancel());
   try{
@@ -177,10 +177,10 @@
    const chunks=[];recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:4500000,audioBitsPerSecond:128000});
    const done=new Promise((resolve,reject)=>{recorder.addEventListener("stop",resolve,{once:true});recorder.addEventListener("error",()=>reject(new Error("Browser video encoder failed.")),{once:true});});
    recorder.addEventListener("dataavailable",e=>{if(e.data?.size)chunks.push(e.data);});
-   v.pause();await seek(v,start);if(task.cancelled)return;const started=performance.now();let last=0;
+   v.pause();v.defaultPlaybackRate=1;v.playbackRate=1;await seek(v,start);if(task.cancelled)return;const started=performance.now();let last=0;
    const stop=()=>{if(stopped)return;stopped=true;cancelAnimationFrame(frame);v.pause();if(recorder&&recorder.state!=="inactive")recorder.stop();};
    const draw=()=>{if(stopped)return;const videoBox=drawVerticalComposition(ctx,v,1080,1920);const t=v.currentTime-start;drawWords(ctx,sub.words||[],t,sub.config||{},1080,1920,videoBox);drawMark(ctx,settings.settings||{},1080,1920);if(performance.now()-last>350){msg.textContent="Rendering in this browser… "+Math.round(Math.min(99,Math.max(0,t/duration*100)))+"%";last=performance.now();}if(v.currentTime>=end||v.ended){stop();return;}frame=requestAnimationFrame(draw);};
-   recorder.start(1000);await v.play();frame=requestAnimationFrame(draw);const timeout=setTimeout(stop,(duration+10)*1000);await done;clearTimeout(timeout);if(task.cancelled)return;
+   recorder.start(1000);await v.play();frame=requestAnimationFrame(draw);await Promise.race([done,new Promise((_,reject)=>{renderWatchdog=setTimeout(()=>reject(new Error("Source playback stalled before the selected clip finished. No render was saved; retry after the preview is stable.")),(duration+15)*1000);})]);if(renderWatchdog){clearTimeout(renderWatchdog);renderWatchdog=null;}if(task.cancelled)return;
    if(performance.now()-started<500)throw new Error("The source did not play long enough. Retry.");
    const blob=new Blob(chunks,{type:"video/webm"});if(blob.size<1024)throw new Error("Render output is empty. Check source playback and retry.");if(blob.size>90*1024*1024)throw new Error("Render exceeds the 90 MB limit. Try a shorter clip.");
    if(task.cancelled)return;
@@ -208,7 +208,7 @@
    const link=document.createElement("a");link.href=result.asset.url;link.target="_blank";link.rel="noopener";link.textContent="Open rendered video ↗";msg.append(link);
    btn.textContent="Render again";
   }catch(e){if(!task.cancelled){msg.textContent=e.message||"Render failed. Retry.";btn.textContent="Retry render";}}
-  finally{stopped=true;cancelAnimationFrame(frame);if(xhr&&xhr.readyState!==XMLHttpRequest.DONE){try{xhr.abort();}catch{}}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(sourceStream)sourceStream.getTracks().forEach(t=>t.stop());cancelBtn.remove();if(activeCancel===task)activeCancel=null;busy=false;btn.disabled=false;}
+  finally{if(renderWatchdog)clearTimeout(renderWatchdog);stopped=true;cancelAnimationFrame(frame);try{v.playbackRate=originalPlaybackRate||1;}catch{}if(xhr&&xhr.readyState!==XMLHttpRequest.DONE){try{xhr.abort();}catch{}}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(sourceStream)sourceStream.getTracks().forEach(t=>t.stop());cancelBtn.remove();if(activeCancel===task)activeCancel=null;busy=false;btn.disabled=false;}
  }
  document.addEventListener("click",e=>{if(e.target.closest("#clip-render-btn"))render();});
 })();
