@@ -473,9 +473,21 @@ async function loadWorkspaceWinnerPatterns(env, workspaceId) {
   `).bind(workspaceId).all();
   const measured=(result.results||[]).filter(row=>row.views!==null&&row.views!==undefined&&row.published_at);
   if(measured.length<3)return {patterns:[],confidence:0,sampleSize:measured.length};
-  const scored=measured.map(row=>({...row,velocity:Number(row.views||0)/Math.max(1,(Date.now()-new Date(row.published_at).getTime())/86400000)})).sort((a,b)=>b.velocity-a.velocity);
-  const winners=scored.slice(0,Math.max(1,Math.ceil(scored.length*0.3))).slice(0,5);
-  return {patterns:winners.map(row=>({title:String(row.title||"").slice(0,120),hook:String(row.hook||"").slice(0,180),viewsPerDay:Math.round(row.velocity),averageViewed:row.average_view_percentage===null||row.average_view_percentage===undefined?null:Number(row.average_view_percentage)})),confidence:Math.min(1,measured.length/8),sampleSize:measured.length};
+  const scored=measured.map(row=>({...row,velocity:Number(row.views||0)/Math.max(1,(Date.now()-new Date(row.published_at).getTime())/86400000)}));
+  const byVelocity=[...scored].sort((a,b)=>b.velocity-a.velocity);
+  const retentionMeasured=scored.filter(row=>row.average_view_percentage!==null&&row.average_view_percentage!==undefined&&Number.isFinite(Number(row.average_view_percentage)));
+  const retentionReady=retentionMeasured.length>=3;
+  const byRetention=retentionReady?[...retentionMeasured].sort((a,b)=>Number(b.average_view_percentage)-Number(a.average_view_percentage)):[];
+  const percentile=(ordered,row,key)=>{const index=ordered.findIndex(item=>item===row);return ordered.length<=1?1:1-index/(ordered.length-1);};
+  for(const row of scored){
+    const velocityRank=percentile(byVelocity,row,"velocity");
+    const retentionRank=retentionReady&&row.average_view_percentage!==null&&row.average_view_percentage!==undefined?percentile(byRetention,row,"average_view_percentage"):velocityRank;
+    row.winnerScore=retentionReady&&row.average_view_percentage!==null&&row.average_view_percentage!==undefined
+      ? velocityRank*0.75+retentionRank*0.25
+      : velocityRank;
+  }
+  const winners=scored.sort((a,b)=>b.winnerScore-a.winnerScore||b.velocity-a.velocity).slice(0,Math.max(1,Math.ceil(scored.length*0.3))).slice(0,5);
+  return {patterns:winners.map(row=>({title:String(row.title||"").slice(0,120),hook:String(row.hook||"").slice(0,180),viewsPerDay:Math.round(row.velocity),averageViewed:row.average_view_percentage===null||row.average_view_percentage===undefined?null:Number(row.average_view_percentage)})),confidence:Math.min(1,measured.length/8),sampleSize:measured.length,retentionSampleSize:retentionMeasured.length};
   } catch (error) {
     // Keep discovery operational before the optional performance-snapshot migration is applied.
     console.warn("workspace_winner_learning_unavailable", error?.message || "unknown");
