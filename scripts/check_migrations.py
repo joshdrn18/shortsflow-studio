@@ -4,7 +4,7 @@ import sqlite3
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
 
-expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql"]
+expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql", "0016_workspace_brand_profiles.sql"]
 actual = [path.name for path in MIGRATIONS]
 if actual != expected:
     raise SystemExit(f"Unexpected migration sequence: {actual}")
@@ -42,6 +42,7 @@ required = {
     "youtube_connections",
     "youtube_oauth_states",
     "workspace_brand_kits",
+    "workspace_brand_profiles",
 }
 missing = required - tables
 if missing:
@@ -150,6 +151,32 @@ reservation = connection.execute(
 ).fetchone()
 if usage != (100.0, 60) or reservation is not None:
     raise SystemExit(f"AI daily budget guard failed: usage={usage}, reservation={reservation}")
+
+# Multiple Brand Profiles persist separately and can be activated.
+connection.execute(
+    "INSERT INTO workspace_brand_profiles (id, workspace_id, profile_name, subtitle_config_json, watermark_config_json) VALUES (?, ?, ?, ?, ?)",
+    ("brand-profile-a", "workspace-test", "Gaming", '{"fontSize":32}', '{"watermarkText":"GAMING"}'),
+)
+connection.execute(
+    "INSERT INTO workspace_brand_profiles (id, workspace_id, profile_name) VALUES (?, ?, ?)",
+    ("brand-profile-b", "workspace-test", "Podcast"),
+)
+profiles = connection.execute(
+    "SELECT profile_name FROM workspace_brand_profiles WHERE workspace_id=? ORDER BY profile_name",
+    ("workspace-test",),
+).fetchall()
+if profiles != [("Gaming",), ("Podcast",)]:
+    raise SystemExit(f"Brand Profile persistence failed: {profiles}")
+connection.execute(
+    "UPDATE workspace_brand_kits SET active_profile_id=? WHERE workspace_id=?",
+    ("brand-profile-a", "workspace-test"),
+)
+active = connection.execute(
+    "SELECT active_profile_id FROM workspace_brand_kits WHERE workspace_id=?",
+    ("workspace-test",),
+).fetchone()
+if active != ("brand-profile-a",):
+    raise SystemExit("Brand Profile activation persistence failed")
 
 connection.commit()
 connection.close()
