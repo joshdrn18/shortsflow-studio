@@ -52,14 +52,15 @@ export async function onRequestPost({request,env,params}){
   if (!stored || Number(stored.size) !== size) {
    throw new Error("R2 upload verification failed. The stored file size does not match the render.");
   }
-  const latest=await env.DB.prepare("SELECT COALESCE(MAX(version),0) AS version FROM clip_assets WHERE clip_id=? AND asset_type='render'").bind(id).first();
-  const version=Number(latest?.version||0)+1,now=new Date().toISOString();
+  const now=new Date().toISOString();
   const saved = await env.DB.batch([
-   env.DB.prepare("INSERT INTO clip_assets (id,clip_id,asset_type,storage_key,mime_type,size_bytes,version,metadata_version,created_at) SELECT ?,?,'render',?,'video/webm',?,?,?,? WHERE (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?").bind(assetId,id,key,size,version,mv,now,id,mv),
+   env.DB.prepare("INSERT INTO clip_assets (id,clip_id,asset_type,storage_key,mime_type,size_bytes,version,metadata_version,created_at) SELECT ?,?,'render',?,'video/webm',?,(SELECT COALESCE(MAX(version),0)+1 FROM clip_assets WHERE clip_id=? AND asset_type='render'),?,?,? WHERE (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?").bind(assetId,id,key,size,id,mv,now,id,mv),
    env.DB.prepare("UPDATE clips SET status='rendered',updated_at=? WHERE id=? AND workspace_id=? AND (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?").bind(now,id,user.workspace.id,id,mv),
-   env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) SELECT ?,?, 'clip',?,'clip_rendered',?,? WHERE EXISTS (SELECT 1 FROM clip_assets WHERE id=?)").bind(crypto.randomUUID(),user.workspace.id,id,JSON.stringify({assetVersion:version,metadataVersion:mv,sizeBytes:size,format:"webm"}),now,assetId)
+   env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) SELECT ?,?, 'clip',?,'clip_rendered',json_object('assetVersion',(SELECT version FROM clip_assets WHERE id=?),'metadataVersion',?,'sizeBytes',?,'format','webm'),? WHERE EXISTS (SELECT 1 FROM clip_assets WHERE id=?)").bind(crypto.randomUUID(),user.workspace.id,id,assetId,mv,size,now,assetId)
   ]);
   if (Number(saved[0]?.meta?.changes || 0) !== 1) throw new Error("Clip settings changed while rendering. Please render the latest version again.");
-  return json({ok:true,asset:{id:assetId,version,metadataVersion:mv,sizeBytes:size,mimeType:"video/webm",url:`/api/clips/${id}/render`}},201);
+  const asset=await env.DB.prepare("SELECT version FROM clip_assets WHERE id=? AND clip_id=?").bind(assetId,id).first();
+  if(!asset)throw new Error("The rendered asset could not be verified after saving.");
+  return json({ok:true,asset:{id:assetId,version:Number(asset.version),metadataVersion:mv,sizeBytes:size,mimeType:"video/webm",url:`/api/clips/${id}/render`}},201);
  }catch(e){if(key){try{await env.MEDIA.delete(key);}catch{}}console.error("render_upload_failed",e);const msg=String(e?.message||"");return json({ok:false,error:msg.includes("90 MB")?msg:"Could not save the rendered video. Please retry."},msg.includes("90 MB")?413:500);}
 }
