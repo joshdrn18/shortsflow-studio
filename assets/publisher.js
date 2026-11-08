@@ -9,7 +9,7 @@
    <div class="publisher-hero"><div><span class="publisher-kicker">YOUTUBE STUDIO · PUBLISHING</span><h2>Your next Short,<br><em>ready when you are.</em></h2><p>Connect your channel, choose an approved render, prepare its metadata and schedule the upload. Nothing is sent without your explicit action.</p></div><div class="publisher-lock"><span>▶</span><b>Approval protected</b><small>Only approved current renders</small></div></div>
    <section class="publisher-connect panel"><div class="publisher-channel-mark">▶</div><div class="publisher-channel-copy"><span class="publisher-kicker">CHANNEL CONNECTION</span><h3 id="youtube-channel-title">YouTube channel not connected</h3><p id="youtube-channel-detail">Connect your Google account to prepare YouTube uploads.</p></div><a class="primary-button" id="youtube-connect" href="/api/youtube/connect">Connect YouTube <span>↗</span></a></section>
    <div class="publisher-stats"><div><span>Approved & ready</span><strong id="publisher-eligible">—</strong></div><div><span>Queued uploads</span><strong id="publisher-queued">—</strong></div><div><span>Published</span><strong id="publisher-published">—</strong></div></div>
-   <section class="publisher-section publisher-performance"><div class="publisher-section-head"><div><span class="publisher-kicker">90-DAY GROWTH TRACKER</span><h3>10M Shorts views target</h3><p>Track views on Shorts published during the last 90 days. Refresh to pull the latest YouTube counts.</p></div><button class="text-button" id="publisher-metrics-sync" type="button">↻ Sync views</button></div><div class="publisher-growth-stats"><div><span>Tracked views</span><strong id="publisher-metric-views">—</strong></div><div><span>Published Shorts</span><strong id="publisher-metric-videos">—</strong></div><div><span>Likes</span><strong id="publisher-metric-likes">—</strong></div><div><span>Comments</span><strong id="publisher-metric-comments">—</strong></div></div><div class="publisher-growth-track"><div class="publisher-growth-track-head"><b id="publisher-metric-progress">0% of 10M</b><span id="publisher-metric-updated">Not synced yet</span></div><div class="publisher-growth-bar"><span id="publisher-metric-bar"></span></div></div><div id="publisher-metric-videos-list" class="publisher-metric-videos"><div class="publisher-empty">Sync your YouTube channel to load performance.</div></div><small class="publisher-metric-note">YouTube Data API provides lifetime view counts for each video. This tracker is not a date-range analytics report and does not represent retention or unique viewers.</small></section>
+   <section class="publisher-section publisher-performance"><div class="publisher-section-head"><div><span class="publisher-kicker">90-DAY GROWTH TRACKER</span><h3>10M Shorts views target</h3><p>Track views on Shorts published during the last 90 days. Refresh to pull the latest YouTube counts.</p></div><button class="text-button" id="publisher-metrics-sync" type="button">↻ Sync views</button></div><div class="publisher-growth-stats"><div><span>Tracked views</span><strong id="publisher-metric-views">—</strong></div><div><span>Published Shorts</span><strong id="publisher-metric-videos">—</strong></div><div><span>Likes</span><strong id="publisher-metric-likes">—</strong></div><div><span>Comments</span><strong id="publisher-metric-comments">—</strong></div></div><div class="publisher-growth-stats publisher-retention-stats"><div><span>Average viewed</span><strong id="publisher-retention-average">—</strong></div><div><span>Average view duration</span><strong id="publisher-retention-duration">—</strong></div><div><span>Analytics videos</span><strong id="publisher-retention-count">—</strong></div></div><div class="publisher-growth-track"><div class="publisher-growth-track-head"><b id="publisher-metric-progress">0% of 10M</b><span id="publisher-metric-updated">Not synced yet</span></div><div class="publisher-growth-bar"><span id="publisher-metric-bar"></span></div></div><div id="publisher-metric-videos-list" class="publisher-metric-videos"><div class="publisher-empty">Sync your YouTube channel to load performance.</div></div><small class="publisher-metric-note">YouTube Data API provides lifetime view counts for each video. This tracker is not a date-range analytics report and does not represent retention or unique viewers.</small></section>
    <section class="publisher-section"><div class="publisher-section-head"><div><span class="publisher-kicker">UPLOAD PLANNER</span><h3>Prepare a YouTube Short</h3><p>Pick a clip approved in Review Center. Its approval is checked again when you queue it.</p></div></div>
     <form id="publisher-form" class="publisher-form">
      <label>Approved render<select id="publisher-clip" required><option value="">Loading approved renders…</option></select></label>
@@ -82,6 +82,23 @@
  }
 
  function metricNumber(value){return new Intl.NumberFormat().format(Number(value||0));}
+ function durationLabel(value){const seconds=Math.max(0,Math.round(Number(value||0)));return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0");}
+ async function loadRetention(){
+  try{
+   const response=await fetch("/api/youtube/retention",{headers:{accept:"application/json"}}),data=await response.json();
+   if(!response.ok||!data.ok)throw new Error(data.error||"Retention metrics unavailable.");
+   state.retention=data;
+   $("#publisher-retention-average").textContent=Number(data.averageViewPercentage||0).toFixed(1)+"%";
+   $("#publisher-retention-count").textContent=metricNumber(data.measuredCount);
+   const measured=(data.videos||[]).filter(v=>v.average_view_duration!==null&&v.average_view_duration!==undefined);
+   const average=measured.length?measured.reduce((sum,v)=>sum+Number(v.average_view_duration||0),0)/measured.length:0;
+   $("#publisher-retention-duration").textContent=measured.length?durationLabel(average):"—";
+   const note=$(".publisher-metric-note");if(note)note.textContent=data.note||"YouTube Analytics retention metrics.";
+  }catch(error){
+   $("#publisher-retention-average").textContent="—";$("#publisher-retention-duration").textContent="—";$("#publisher-retention-count").textContent="—";
+   const note=$(".publisher-metric-note");if(note)note.textContent=error.message+" Use Reconnect YouTube to grant Analytics access.";
+  }
+ }
  async function loadMetrics(){
   const views=$("#publisher-metric-videos-list");if(!views)return;
   try{
@@ -103,7 +120,12 @@
  async function syncMetrics(){
   const button=$("#publisher-metrics-sync");if(!button)return;
   button.disabled=true;button.textContent="Syncing…";
-  try{const response=await fetch("/api/youtube/analytics",{method:"POST",headers:{accept:"application/json"}}),data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not sync metrics.");await loadMetrics();setMessage(data.synced?("Synced "+data.synced+" published video metrics."):(data.message||"Metrics are up to date."));}
+  try{
+   const response=await fetch("/api/youtube/analytics",{method:"POST",headers:{accept:"application/json"}}),data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not sync views.");
+   await loadMetrics();
+   let retentionMessage="";try{const rr=await fetch("/api/youtube/retention",{method:"POST",headers:{accept:"application/json"}}),rd=await rr.json();if(!rr.ok||!rd.ok)throw new Error(rd.error||"Analytics sync unavailable.");await loadRetention();retentionMessage=" Retention synced for "+rd.synced+" videos ("+rd.startDate+" to "+rd.endDate+").";}catch(e){retentionMessage=" Views synced. "+e.message;}
+   setMessage((data.synced?("Synced "+data.synced+" published video view counts."):(data.message||"Views are up to date."))+retentionMessage);
+  }
   catch(error){setMessage(error.message,true);}
   finally{button.disabled=false;button.textContent="↻ Sync views";}
  }
@@ -150,7 +172,7 @@
    catch{setMessage("Brand Profiles unavailable. Publisher queue remains usable; apply migration 0017 to enable saved metadata templates.",true);}
    state.connection=p.connection;state.jobs=p.jobs||[];state.eligible=(r.items||[]).filter(x=>x.decision==="approved");state.profiles=b.profiles||[];state.activeProfileId=b.activeProfileId||null;
    render();renderBrandProfileOptions();loadBrandTemplateFields();
-   loadMetrics();
+   loadMetrics();loadRetention();
   }catch(e){setMessage(e.message,true);}
   finally{state.loading=false;}
  }
