@@ -472,11 +472,24 @@ async function processClipDiscovery(env, job) {
 
   let words = [];
   try { words = JSON.parse(transcript.segments_json || "[]"); } catch { words = []; }
-  if (!Array.isArray(words) || words.length < 20) {
-    throw new Error("Not enough timestamped speech was found to identify reliable clip boundaries.");
-  }
-
   const duration = Number(transcript.audio_duration_seconds || 0);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error("Transcript duration is missing or invalid. Re-run source analysis before clip discovery.");
+  }
+  // Normalize transcript input once. Bad or unsorted word timestamps can otherwise
+  // make nearest-word snapping select the wrong boundary or produce invalid clips.
+  words = (Array.isArray(words) ? words : []).map(word => ({
+    word: String(word?.word || "").replace(/\\s+/g, " ").trim(),
+    start: Number(word?.start),
+    end: Number(word?.end)
+  })).filter(word =>
+    word.word && Number.isFinite(word.start) && Number.isFinite(word.end) &&
+    word.start >= 0 && word.end > word.start && word.start < duration &&
+    word.end <= duration + 1
+  ).sort((a, b) => a.start - b.start);
+  if (words.length < 20) {
+    throw new Error("Not enough valid timestamped speech was found to identify reliable clip boundaries.");
+  }
   const source = await env.DB.prepare("SELECT title FROM source_videos WHERE id = ? AND workspace_id = ?").bind(job.source_video_id, job.workspace_id).first();
   const sourceTitle = String(source?.title || "");
   const system = "You are an expert short-form video editor and social copywriter. Identify self-contained, high-retention moments from timestamped speech. Never invent speech, events, character actions, or timestamps. Metadata quality is mandatory: titles must be specific, descriptive, natural, and normally 4–10 words; never use a one-word reaction such as Wow, Whoa, Yes, or Okay as a title. Captions must be a complete, engaging 1–2 sentence description of the actual moment, not a repeat of the title or a transcript fragment. Hashtags must be 3–6 relevant topical tags grounded in the source and transcript; never output #topic or generic filler. Return valid JSON only.";
@@ -546,7 +559,7 @@ async function processClipDiscovery(env, job) {
     const candidate = item.candidate;
     let rawStart = Number(candidate.startSeconds ?? candidate.start_seconds);
     let rawEnd = Number(candidate.endSeconds ?? candidate.end_seconds);
-    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) { rejected.invalidTime++; continue; }
+    if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd) || rawEnd <= rawStart) { rejected.invalidTime++; continue; }
     const windowStart = Number(candidate.__windowStart || 0);
     const windowEnd = Number(candidate.__windowEnd || duration);
     // Some model responses return timestamps relative to their supplied window.
@@ -554,6 +567,12 @@ async function processClipDiscovery(env, job) {
     if (windowStart > 0 && rawStart < windowStart - 3 && rawEnd <= (windowEnd - windowStart) + 3) {
       rawStart += windowStart;
       rawEnd += windowStart;
+    }
+    // Reject hallucinated timestamps outside the exact transcript window instead of
+    // silently snapping them to a distant word elsewhere in the source.
+    if (rawStart < windowStart - 2 || rawEnd > windowEnd + 2 || rawEnd - rawStart > 75) {
+      rejected.boundary++;
+      continue;
     }
     const startWord = nearest(rawStart, "start");
     const endWord = nearest(rawEnd, "end");
