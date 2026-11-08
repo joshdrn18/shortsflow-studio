@@ -257,3 +257,9 @@ button.profile-row:hover,button.profile-row[aria-expanded="true"]{background:#19
 .subtitle-brand-kit input{height:33px;min-width:0;border:1px solid #383344;border-radius:6px;background:#0c0e14;color:#eee;padding:0 9px;font:10px 'DM Sans',sans-serif}
 .subtitle-brand-actions{display:flex;flex-wrap:wrap;gap:6px}.subtitle-brand-actions button{min-height:32px;padding:0 9px;font-size:9px;white-space:nowrap}
 @media(max-width:760px){.subtitle-brand-kit{grid-template-columns:1fr 1fr}.subtitle-brand-kit>div:first-child{grid-column:1/-1}.subtitle-brand-actions{grid-column:1/-1}.subtitle-brand-actions button{flex:1}}
+
+/* Multi-profile Brand Kit controls */
+.subtitle-brand-kit{grid-template-columns:minmax(150px,1fr) minmax(150px,190px) minmax(150px,190px) auto}
+.subtitle-brand-kit select{height:33px;min-width:0;border:1px solid #383344;border-radius:6px;background:#0c0e14;color:#eee;padding:0 9px;font:10px 'DM Sans',sans-serif}
+.subtitle-brand-actions button:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:980px){.subtitle-brand-kit{grid-template-columns:1fr 1fr}.subtitle-brand-kit>div:first-child{grid-column:1/-1}.subtitle-brand-actions{grid-column:1/-1}.subtitle-brand-actions button{flex:1}}
