@@ -97,7 +97,7 @@
    const chunks=[];recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:4500000,audioBitsPerSecond:128000});
    const done=new Promise((resolve,reject)=>{recorder.addEventListener("stop",resolve,{once:true});recorder.addEventListener("error",()=>reject(new Error("Browser video encoder failed.")),{once:true});});
    recorder.addEventListener("dataavailable",e=>{if(e.data?.size)chunks.push(e.data);});
-   v.pause();await seek(v,start);const started=performance.now();let last=0;
+   v.pause();await seek(v,start);if(task.cancelled)return;const started=performance.now();let last=0;
    const stop=()=>{if(stopped)return;stopped=true;cancelAnimationFrame(frame);v.pause();if(recorder&&recorder.state!=="inactive")recorder.stop();};
    const draw=()=>{if(stopped)return;const videoBox=drawVerticalComposition(ctx,v,1080,1920);const t=v.currentTime-start;drawWords(ctx,sub.words||[],t,sub.config||{},1080,1920,videoBox);drawMark(ctx,settings.settings||{},1080,1920);if(performance.now()-last>350){msg.textContent="Rendering in this browser… "+Math.round(Math.min(99,Math.max(0,t/duration*100)))+"%";last=performance.now();}if(v.currentTime>=end||v.ended){stop();return;}frame=requestAnimationFrame(draw);};
    recorder.start(1000);await v.play();frame=requestAnimationFrame(draw);const timeout=setTimeout(stop,(duration+10)*1000);await done;clearTimeout(timeout);
