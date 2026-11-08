@@ -14,6 +14,7 @@
      <label>Approved render<select id="publisher-clip" required><option value="">Loading approved renders…</option></select></label>
      <div class="publisher-brand-meta"><div class="publisher-brand-meta-head"><div><b>Brand metadata profile</b><small>Use saved channel-specific title, description and hashtag rules.</small></div><select id="publisher-brand-profile"><option value="">Loading profiles…</option></select></div><div class="publisher-meta-fields"><label>Title template<input id="publisher-title-template" maxlength="100" placeholder="{clip_title} #Shorts"></label><label>Description template<textarea id="publisher-description-template" rows="2" maxlength="4000" placeholder="{clip_title}\n\n{hashtags}"></textarea></label><label>Hashtags<input id="publisher-hashtag-template" maxlength="500" placeholder="#shorts, #gaming"></label><label>Default tags<input id="publisher-tag-template" maxlength="500" placeholder="shorts, gaming, creator"></label></div><div class="publisher-brand-actions"><button type="button" class="text-button" id="publisher-brand-save">Save profile metadata</button><button type="button" class="secondary-button" id="publisher-brand-apply">Apply to selected clip</button></div></div>\n     <label>Video title<input id="publisher-title" maxlength="100" required placeholder="Give your Short a clear title"></label>
      <label>Description<textarea id="publisher-description" rows="4" maxlength="5000" placeholder="Add context, links or credits…"></textarea></label>
+     <section class="publisher-metadata-preview" aria-live="polite"><div class="publisher-preview-head"><div><span class="publisher-kicker">FINAL METADATA PREVIEW</span><b>Ready for YouTube</b></div><span class="publisher-preview-count" id="publisher-preview-count">0 / 100</span></div><div class="publisher-preview-body"><strong id="publisher-preview-title">Your video title will appear here</strong><p id="publisher-preview-description">Your description preview will appear here.</p><div id="publisher-preview-tags" class="publisher-preview-tags"><span>No tags added</span></div></div><small>Preview reflects the actual title, description and tags in the upload form. Review before queueing.</small></section>
      <div class="publisher-form-row"><label>Visibility<select id="publisher-privacy"><option value="private">Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select></label><label>Schedule (optional)<input id="publisher-schedule" type="datetime-local"></label></div>
      <label>Tags <input id="publisher-tags" placeholder="shorts, topic, channel (comma separated)"></label>
      <div class="publisher-form-foot"><p>New jobs are queued only. Actual upload processing is a separate step and will not start until the publishing worker is configured.</p><button class="primary-button" type="submit" id="publisher-submit" disabled>Queue upload <span>→</span></button></div>
@@ -28,6 +29,8 @@
   $("#publisher-brand-profile").addEventListener("change",loadBrandTemplateFields);
   $("#publisher-brand-save").addEventListener("click",saveBrandTemplate);
   $("#publisher-brand-apply").addEventListener("click",applyBrandTemplate);
+  ["#publisher-title","#publisher-description","#publisher-tags"].forEach(selector=>$(selector).addEventListener("input",renderMetadataPreview));
+  renderMetadataPreview();
   $("#publisher-form").addEventListener("submit",queue);
  }
  
@@ -73,8 +76,21 @@
   $("#publisher-description").value=description||item.caption||"";
   $("#publisher-tags").value=tags.join(", ");
   setMessage("Brand metadata applied. Placeholders were resolved and duplicate/over-limit tags were removed. Review everything before queueing.");
+  renderMetadataPreview();
  }
 
+ function renderMetadataPreview(){
+  const title=$("#publisher-title")?.value.trim()||"";
+  const description=$("#publisher-description")?.value.trim()||"";
+  const tags=($("#publisher-tags")?.value||"").split(",").map(tag=>tag.trim()).filter(Boolean);
+  $("#publisher-preview-title").textContent=title||"Your video title will appear here";
+  $("#publisher-preview-description").textContent=description||"Your description preview will appear here.";
+  $("#publisher-preview-count").textContent=title.length+" / 100";
+  const tagBox=$("#publisher-preview-tags");
+  tagBox.replaceChildren();
+  if(!tags.length){const empty=document.createElement("span");empty.textContent="No tags added";tagBox.append(empty);}
+  else tags.forEach(tag=>{const chip=document.createElement("span");chip.textContent="#"+tag.replace(/^#+/,"");tagBox.append(chip);});
+ }
  function setMessage(msg,error=false){const el=$("#publisher-message");el.textContent=msg;el.classList.toggle("error",error);}
  function render(){
   const c=state.connection;
@@ -116,7 +132,7 @@
    const scheduled=$("#publisher-schedule").value?new Date($("#publisher-schedule").value).toISOString():null;
    const response=await fetch("/api/youtube",{method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify({clipId:$("#publisher-clip").value,title:$("#publisher-title").value,description:$("#publisher-description").value,privacyStatus:$("#publisher-privacy").value,scheduledAt:scheduled,tags:$("#publisher-tags").value.split(",").map(x=>x.trim()).filter(Boolean)})});
    const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not queue upload.");
-   setMessage("Upload job queued. It is not published yet.");$("#publisher-form").reset();await load();
+   setMessage("Upload job queued. It is not published yet.");$("#publisher-form").reset();renderMetadataPreview();await load();
   }catch(err){setMessage(err.message,true);}
   finally{btn.disabled=!state.connection?.connected||!state.eligible.length;btn.innerHTML='Queue upload <span>→</span>';}
  }
