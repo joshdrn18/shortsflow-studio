@@ -28,6 +28,16 @@ async function processYoutubeJob(env) {
   const mediaBucket = env.SOURCE_MEDIA || env.MEDIA;
   if (!env.DB || !mediaBucket || !env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET || !env.YOUTUBE_TOKEN_ENCRYPTION_KEY) return;
   const now = new Date().toISOString();
+  // Do not leave uploads stuck forever after a Worker termination. Avoid an
+  // automatic retry because YouTube may have accepted the upload already.
+  const staleBefore = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  await env.DB.prepare(`
+    UPDATE publishing_jobs
+    SET status='failed',
+        last_error='Upload worker stopped before confirming the result. Check YouTube Studio before retrying to avoid duplicate uploads.',
+        updated_at=?
+    WHERE platform='youtube' AND status='uploading' AND updated_at<?
+  `).bind(now, staleBefore).run();
   const workerId = crypto.randomUUID();
   const job = await env.DB.prepare(`
     UPDATE publishing_jobs SET status='uploading',attempts=attempts+1,updated_at=?
