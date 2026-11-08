@@ -13,10 +13,20 @@ export async function onRequestPost({request,env}){
  const user=await getSessionUser(request,env);if(!user?.workspace?.id)return json({ok:false,error:"Authentication required."},401);
  const body=await readJson(request),clipId=String(body?.clipId||""),title=String(body?.title||"").trim(),description=String(body?.description||"").trim(),privacy=String(body?.privacyStatus||"private");
  const scheduledAt=body?.scheduledAt?new Date(body.scheduledAt):null;
- const tags=Array.isArray(body?.tags)?body.tags.map(x=>String(x).trim()).filter(Boolean).slice(0,30):[];
  if(!ID.test(clipId))return json({ok:false,error:"Choose a valid clip."},400);
  if(!title||title.length>100)return json({ok:false,error:"YouTube title must contain 1–100 characters."},400);
  if(description.length>5000)return json({ok:false,error:"Description must be 5,000 characters or fewer."},400);
+ if(body?.tags!==undefined&&!Array.isArray(body.tags))return json({ok:false,error:"Tags must be sent as a list."},400);
+ const tags=[],seenTags=new Set();let tagLength=0;
+ for(const value of (Array.isArray(body?.tags)?body.tags:[])){
+  if(typeof value!=="string")return json({ok:false,error:"Each tag must be text."},400);
+  const tag=value.trim().replace(/\s+/g," ");if(!tag)continue;
+  const key=tag.toLocaleLowerCase();if(seenTags.has(key))continue;
+  const addedLength=tag.length+(tags.length?1:0);
+  if(tags.length>=30)return json({ok:false,error:"YouTube allows up to 30 tags per video."},400);
+  if(tagLength+addedLength>500)return json({ok:false,error:"Combined tags must be 500 characters or fewer."},400);
+  seenTags.add(key);tags.push(tag);tagLength+=addedLength;
+ }
  if(!["private","unlisted","public"].includes(privacy))return json({ok:false,error:"Invalid privacy setting."},400);
  if(body?.scheduledAt&&(!scheduledAt||!Number.isFinite(scheduledAt.getTime())||scheduledAt.getTime()<Date.now()+60000))return json({ok:false,error:"Choose a schedule at least one minute in the future."},400);
  try{
