@@ -140,7 +140,7 @@
 .subtitle-preview-frame{position:relative;max-width:520px;margin:0 auto;background:#08090d;border-radius:10px;overflow:hidden}
 .subtitle-preview-frame video{display:block;width:100%;max-height:58vh;object-fit:contain;background:#08090d}
 .subtitle-live-overlay{position:absolute;left:7%;right:7%;z-index:3;display:flex;justify-content:center;align-content:center;align-items:center;flex-wrap:wrap;gap:4px 7px;text-align:center;pointer-events:none;font-family:Manrope,sans-serif;font-size:var(--subtitle-size,28px);font-weight:900;line-height:1.12;letter-spacing:-.7px;color:var(--subtitle-color,#fff);text-transform:uppercase;text-shadow:0 2px 5px #000,0 4px 16px #000}
-.subtitle-live-overlay.is-bottom{bottom:9%}.subtitle-live-overlay.is-top{top:9%}
+.subtitle-live-overlay.is-bottom{bottom:9%}.subtitle-live-overlay.is-top{top:9%}.subtitle-live-overlay.is-center{top:50%;transform:translateY(-50%)}
 .subtitle-live-overlay.has-background span{background:#08090dcc;padding:3px 5px;border-radius:4px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
 .subtitle-live-overlay.pop span.is-active{color:var(--subtitle-highlight);transform:scale(1.08)}
 .subtitle-live-overlay.classic{font-weight:800;letter-spacing:-.3px}.subtitle-live-overlay.classic span.is-active{color:var(--subtitle-highlight)}
