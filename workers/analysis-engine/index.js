@@ -549,10 +549,44 @@ async function processClipDiscovery(env, job) {
     return Math.abs(current - value) < Math.abs(Number(best[field]) - value) ? word : best;
   }, words[0]);
 
-  const ranked = candidates.map(candidate => ({
-    candidate,
-    score: Math.max(0, Math.min(100, Number(candidate.score ?? candidate.aiScore ?? 0)))
-  })).filter(item => Number.isFinite(item.score)).sort((a,b) => b.score - a.score);
+  const ranked = candidates.map(candidate => {
+    const scoreValue = Number(candidate.score ?? candidate.aiScore ?? 0);
+    const score = Number.isFinite(scoreValue) ? Math.max(0, Math.min(100, scoreValue)) : 0;
+    const title = String(candidate.title || "").trim();
+    const hook = String(candidate.hook || "").trim();
+    const reason = String(candidate.reason || "").trim();
+    const caption = String(candidate.caption || "").trim();
+    const titleWords = title.split(/\\s+/).filter(Boolean).length;
+    const genericTitle = /^(yes|yeah|yep|no|okay|ok|wow|whoa|oh|hey|look|wait|what|huh|hello|hi)[.!?\\s]*$/i.test(title);
+    const normalizedHook = hook.toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu, " ").replace(/\\s+/g, " ").trim();
+    const normalizedTitle = title.toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu, " ").replace(/\\s+/g, " ").trim();
+    const payoffPattern = /\\b(reveal|reveals|revealed|secret|surprise|unexpected|finally|turns out|plot twist|the truth|lesson|mistake|because|until|ternyata|akhirnya|rahasia|kejutan|faktanya|justru|malah|alasannya|kesalahan|pelajaran|solusinya)\\b/i;
+    const hookQuality = !hook ? 0 : Math.min(1, hook.length / 55) * 0.55 +
+      (/[?!:]/.test(hook) ? 0.15 : 0) +
+      (hook.split(/\\s+/).filter(Boolean).length >= 5 ? 0.2 : 0) +
+      (normalizedHook && normalizedHook !== normalizedTitle ? 0.1 : 0);
+    const contextQuality = !reason ? 0 : Math.min(1, reason.length / 110) * 0.7 +
+      (/[.!?]/.test(reason) ? 0.15 : 0) +
+      (payoffPattern.test(reason) ? 0.15 : 0);
+    const titleQuality = genericTitle || titleWords < 3 ? 0.15 :
+      titleWords >= 4 && titleWords <= 10 ? 1 :
+      titleWords <= 13 ? 0.75 : 0.5;
+    const captionQuality = !caption ? 0 : Math.min(1, caption.length / 120) * 0.65 +
+      (/[.!?]/.test(caption) ? 0.15 : 0) +
+      (caption.toLowerCase().includes(normalizedTitle) && normalizedTitle.length > 0 ? 0 : 0.2);
+    const payoffQuality = payoffPattern.test([hook, reason, caption].join(" ")) ? 1 : 0.35;
+    const qualityScore = 100 * (
+      hookQuality * 0.25 +
+      contextQuality * 0.25 +
+      titleQuality * 0.15 +
+      captionQuality * 0.15 +
+      payoffQuality * 0.20
+    );
+    // Keep the model's score as the persisted AI score, but rank with a blended
+    // score so a strong hook, clear context and satisfying payoff matter too.
+    const rankScore = score * 0.65 + qualityScore * 0.35;
+    return { candidate, score, qualityScore: Math.round(qualityScore), rankScore: Math.round(rankScore) };
+  }).sort((a,b) => b.rankScore - a.rankScore || b.score - a.score);
 
   for (const item of ranked) {
     if (accepted.length + existing.length >= 15) break;
