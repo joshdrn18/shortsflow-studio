@@ -90,11 +90,19 @@ export async function onRequestDelete({ request, env, params }) {
     ).bind(sourceId, workspaceId).first();
     if (!source) return json({ ok: false, error: "Source video was not found in this workspace." }, 404);
 
+    // Cancel jobs that have not started before touching storage. The worker
+    // claims jobs with a single conditional UPDATE, so a job that wins the
+    // race becomes running and is caught by the active-job check below.
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      "UPDATE processing_jobs SET status = 'cancelled', locked_until = NULL, locked_by = NULL, completed_at = ?, updated_at = ? WHERE source_video_id = ? AND workspace_id = ? AND status = 'queued'"
+    ).bind(now, now, sourceId, workspaceId).run();
+
     const activeJobs = await env.DB.prepare(
-      "SELECT id, status FROM processing_jobs WHERE source_video_id = ? AND workspace_id = ? AND status IN ('claimed','running')"
+      "SELECT id, status FROM processing_jobs WHERE source_video_id = ? AND workspace_id = ? AND status IN ('claimed','running') LIMIT 1"
     ).bind(sourceId, workspaceId).all();
     if ((activeJobs.results || []).length) {
-      return json({ ok: false, error: "This source is being processed right now. Wait for the active job to finish, then delete it." }, 409);
+      return json({ ok: false, error: "This source has an active analysis or render job. Wait for it to finish, then retry deletion. Jobs that had not started were safely cancelled." }, 409);
     }
 
     const publishing = await env.DB.prepare(
