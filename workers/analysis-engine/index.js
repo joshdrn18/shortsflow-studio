@@ -253,7 +253,9 @@ async function ensureTranscript(env, job, payload) {
 }
 
 async function processNextJob(env) {
-  if (!env.DB || !env.SOURCE_MEDIA || !env.MEDIA_TRANSFORM || !env.AI) return;
+  // Pages uses MEDIA while the standalone Worker may use SOURCE_MEDIA.
+  const sourceBucket = env.SOURCE_MEDIA || env.MEDIA;
+  if (!env.DB || !sourceBucket || !env.MEDIA_TRANSFORM || !env.AI) return;
   const job = await claimJob(env);
   if (!job) return;
   if (job.job_type === "discover_clips") {
@@ -309,7 +311,7 @@ async function processNextJob(env) {
       "UPDATE source_videos SET status = 'analyzing', error_message = NULL, updated_at = ? WHERE id = ? AND workspace_id = ?"
     ).bind(new Date().toISOString(), source.id, job.workspace_id).run();
 
-    const object = await env.SOURCE_MEDIA.get(source.storage_key);
+    const object = await sourceBucket.get(source.storage_key);
     if (!object) throw new Error("Original video is missing from private R2 storage.");
 
     const extracted = await env.MEDIA_TRANSFORM.input(object.body).output({
