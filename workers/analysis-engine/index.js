@@ -662,9 +662,12 @@ export default {
         mode: "scheduled",
         bindings: {
           database: Boolean(env.DB),
-          sourceStorage: Boolean(env.SOURCE_MEDIA),
+          sourceStorage: Boolean(env.SOURCE_MEDIA || env.MEDIA),
+          sourceMediaBinding: Boolean(env.SOURCE_MEDIA),
+          mediaBinding: Boolean(env.MEDIA),
           mediaTransformations: Boolean(env.MEDIA_TRANSFORM),
-          workersAI: Boolean(env.AI)
+          workersAI: Boolean(env.AI),
+          youtubePublishingConfigured: Boolean(env.YOUTUBE_CLIENT_ID && env.YOUTUBE_CLIENT_SECRET && env.YOUTUBE_TOKEN_ENCRYPTION_KEY)
         }
       });
     }
