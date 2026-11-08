@@ -129,6 +129,8 @@ export async function onRequestPut({request,env}) {
       await env.DB.prepare("UPDATE workspace_brand_profiles SET profile_name=?,subtitle_config_json=?,watermark_config_json=?,metadata_config_json=?,updated_at=datetime('now') WHERE workspace_id=? AND id=?")
         .bind(name,subtitleJson,watermarkJson,metadataJson,ctx.workspaceId,id).run();
     } else {
+      const count=await env.DB.prepare("SELECT COUNT(*) AS total FROM workspace_brand_profiles WHERE workspace_id=?").bind(ctx.workspaceId).first();
+      if(Number(count?.total||0)>=20)return json({ok:false,error:"A workspace can have up to 20 Brand Profiles."},409);
       id=crypto.randomUUID();
       metadata=validObject(body.metadata)?body.metadata:{};
       await env.DB.prepare("INSERT INTO workspace_brand_profiles (id,workspace_id,profile_name,subtitle_config_json,watermark_config_json,metadata_config_json) VALUES (?,?,?,?,?,?)")
@@ -152,8 +154,17 @@ export async function onRequestDelete({request,env}) {
     if(!row)return json({ok:false,error:"Brand Profile not found."},404);
     const count=await env.DB.prepare("SELECT COUNT(*) AS total FROM workspace_brand_profiles WHERE workspace_id=?").bind(ctx.workspaceId).first();
     if(Number(count?.total||0)<=1)return json({ok:false,error:"Keep at least one Brand Profile. Create another before deleting this one."},409);
+    const legacy=await env.DB.prepare("SELECT active_profile_id FROM workspace_brand_kits WHERE workspace_id=?").bind(ctx.workspaceId).first();
     await env.DB.prepare("DELETE FROM workspace_brand_profiles WHERE workspace_id=? AND id=?").bind(ctx.workspaceId,id).run();
-    const active=await env.DB.prepare("SELECT id,profile_name,subtitle_config_json,watermark_config_json,metadata_config_json,updated_at FROM workspace_brand_profiles WHERE workspace_id=? ORDER BY updated_at DESC LIMIT 1").bind(ctx.workspaceId).first();
+    let active=null;
+    if(legacy?.active_profile_id && legacy.active_profile_id!==id) {
+      active=await env.DB.prepare("SELECT id,profile_name,subtitle_config_json,watermark_config_json,metadata_config_json,updated_at FROM workspace_brand_profiles WHERE workspace_id=? AND id=?")
+        .bind(ctx.workspaceId,legacy.active_profile_id).first();
+    }
+    if(!active) {
+      active=await env.DB.prepare("SELECT id,profile_name,subtitle_config_json,watermark_config_json,metadata_config_json,updated_at FROM workspace_brand_profiles WHERE workspace_id=? ORDER BY updated_at DESC,created_at DESC LIMIT 1")
+        .bind(ctx.workspaceId).first();
+    }
     const profile=shape(active);
     await setLegacyActive(env.DB,ctx.workspaceId,profile);
     return json({ok:true,activeProfile:profile});
