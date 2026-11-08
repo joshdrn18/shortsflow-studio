@@ -43,7 +43,15 @@ export async function onRequestPost({request,env,params}){
   const assetId=crypto.randomUUID();key=`workspaces/${user.workspace.id}/clips/${id}/renders/${assetId}.webm`;
   const pipePromise=request.body.pipeTo(fixed.writable);
   const putPromise=env.MEDIA.put(key,fixed.readable,{httpMetadata:{contentType:"video/webm"},customMetadata:{workspaceId:user.workspace.id,clipId:id,metadataVersion:String(mv),assetId}});
-  await Promise.all([pipePromise,putPromise]);
+  // Wait for both sides to settle before cleanup; otherwise a rejected pipe can
+  // race a still-running R2 put and leave an orphan object behind.
+  const transfer = await Promise.allSettled([pipePromise, putPromise]);
+  const transferError = transfer.find(item => item.status === "rejected");
+  if (transferError) throw transferError.reason || new Error("Render transfer failed.");
+  const stored = await env.MEDIA.head(key);
+  if (!stored || Number(stored.size) !== size) {
+   throw new Error("R2 upload verification failed. The stored file size does not match the render.");
+  }
   const latest=await env.DB.prepare("SELECT COALESCE(MAX(version),0) AS version FROM clip_assets WHERE clip_id=? AND asset_type='render'").bind(id).first();
   const version=Number(latest?.version||0)+1,now=new Date().toISOString();
   const saved = await env.DB.batch([
