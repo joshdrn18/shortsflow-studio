@@ -14,7 +14,7 @@ function cleanConfig(value) {
     fontSize: Math.max(18, Math.min(44, Math.round(Number(v.fontSize) || DEFAULTS.fontSize))),
     color: colors.includes(v.color) ? v.color : DEFAULTS.color,
     highlight: highlights.includes(v.highlight) ? v.highlight : DEFAULTS.highlight,
-    position: v.position === "top" ? "top" : "bottom",
+    position: ["top", "center", "bottom"].includes(v.position) ? v.position : DEFAULTS.position,
     background: v.background !== false
   };
 }
