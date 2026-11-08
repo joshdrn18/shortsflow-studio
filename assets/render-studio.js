@@ -117,7 +117,7 @@
      resolve(data);
     });
     xhr.addEventListener("error",()=>reject(new Error("Network error while uploading to R2. Check connection and retry.")));
-    xhr.addEventListener("timeout",()=>reject(new Error("R2 upload timed out after 3 minutes. The render is still private; retry the upload.")));
+    xhr.addEventListener("timeout",()=>reject(new Error("R2 upload timed out after 3 minutes. No saved asset was confirmed; retry the render.")));
     xhr.addEventListener("abort",()=>reject(new Error("R2 upload was cancelled.")));
     xhr.send(blob);msg.textContent="Connecting to private R2 storage…";
    });
