@@ -4,7 +4,7 @@ import sqlite3
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
 
-expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql"]
+expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql"]
 actual = [path.name for path in MIGRATIONS]
 if actual != expected:
     raise SystemExit(f"Unexpected migration sequence: {actual}")
@@ -38,6 +38,7 @@ required = {
     "processing_jobs",
     "source_transcripts",
     "ai_usage_daily",
+    "ai_usage_reservations",
     "youtube_connections",
     "youtube_oauth_states",
 }
@@ -106,6 +107,36 @@ for position in ("top-left", "top-center", "top-right", "center", "bottom-left",
         "ON CONFLICT(workspace_id) DO UPDATE SET watermark_position=excluded.watermark_position",
         ("workspace-test", position),
     )
+
+# AI reservations must be idempotent and the daily cap must be enforced atomically.
+connection.execute(
+    "INSERT INTO ai_usage_reservations (reservation_key, usage_date, neurons, audio_seconds, created_at) VALUES (?, ?, ?, ?, ?)",
+    ("audio:job-a:0:0", "2026-11-08", 100.0, 60, "2026-11-08T00:00:00Z"),
+)
+connection.execute(
+    "INSERT OR IGNORE INTO ai_usage_reservations (reservation_key, usage_date, neurons, audio_seconds, created_at) VALUES (?, ?, ?, ?, ?)",
+    ("audio:job-a:0:0", "2026-11-08", 250.0, 60, "2026-11-08T00:00:01Z"),
+)
+usage = connection.execute(
+    "SELECT neurons_reserved, audio_seconds_reserved FROM ai_usage_daily WHERE usage_date=?",
+    ("2026-11-08",),
+).fetchone()
+if usage != (100.0, 60):
+    raise SystemExit(f"AI reservation was not idempotent: {usage}")
+connection.execute(
+    "INSERT OR IGNORE INTO ai_usage_reservations (reservation_key, usage_date, neurons, audio_seconds, created_at) VALUES (?, ?, ?, ?, ?)",
+    ("audio:job-b:0:0", "2026-11-08", 8000.0, 60, "2026-11-08T00:00:02Z"),
+)
+usage = connection.execute(
+    "SELECT neurons_reserved, audio_seconds_reserved FROM ai_usage_daily WHERE usage_date=?",
+    ("2026-11-08",),
+).fetchone()
+reservation = connection.execute(
+    "SELECT reservation_key FROM ai_usage_reservations WHERE reservation_key=?",
+    ("audio:job-b:0:0",),
+).fetchone()
+if usage != (100.0, 60) or reservation is not None:
+    raise SystemExit(f"AI daily budget guard failed: usage={usage}, reservation={reservation}")
 
 connection.commit()
 connection.close()
