@@ -38,7 +38,7 @@ if unversioned:
 
 package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
 command = package["scripts"]["check:js"]
-checked = set(re.findall(r"node --check '([^']+\\.js)'", command))
+checked = set(re.findall(r"node --check '([^']+\.js)'", command))
 actual = {str(path.relative_to(ROOT)) for path in (ROOT / "assets").glob("*.js")}
 actual |= {str(path.relative_to(ROOT)) for path in (ROOT / "functions").rglob("*.js")}
 actual |= {str(path.relative_to(ROOT)) for path in (ROOT / "workers").rglob("*.js")}
