@@ -23,3 +23,6 @@ jobs:
       - name: Validate source and database migrations
         run: |
           npm run check
+      - name: Smoke test deployed production website
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: python3 scripts/smoke_test.py
