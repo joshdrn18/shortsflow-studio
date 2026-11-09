@@ -984,7 +984,11 @@ async function handleBackgroundRender(request,env,url){
    env.DB.prepare("UPDATE clips SET status='rendered',updated_at=? WHERE id=? AND workspace_id=? AND (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=? AND EXISTS(SELECT 1 FROM clip_assets WHERE id=?)").bind(now,job.clip_id,job.workspace_id,job.clip_id,job.metadata_version,assetId),
    env.DB.prepare("INSERT INTO activity_logs(id,workspace_id,entity_type,entity_id,event,details,created_at) VALUES(?,?, 'clip',?,'clip_rendered',?,?)").bind(crypto.randomUUID(),job.workspace_id,job.clip_id,JSON.stringify({jobId:job.id,assetId,metadataVersion:Number(job.metadata_version),sizeBytes:size,format:"mp4",engine:"background-ffmpeg"}),now)
   ]);
-  if(Number(result[0]?.meta?.changes||0)!==1){await bucket.delete(key);return json({ok:false,error:"Clip changed while saving the background render."},409);}
+  if(Number(result[0]?.meta?.changes||0)!==1){
+   await bucket.delete(key);
+   await env.DB.prepare("UPDATE clip_render_jobs SET status='failed',last_error='Clip metadata changed before the render could be saved.',runner_id=NULL,locked_until=NULL,updated_at=? WHERE id=? AND status='running' AND runner_id=?").bind(now,job.id,runner.runnerId).run();
+   return json({ok:false,error:"Clip changed while saving the background render."},409);
+  }
   return json({ok:true,assetId,sizeBytes:size,mimeType:"video/mp4"});
  }
  if(request.method==="POST"&&route==="/internal/render/fail"){
@@ -1015,7 +1019,8 @@ export default {
           mediaBinding: Boolean(env.MEDIA),
           mediaTransformations: Boolean(env.MEDIA_TRANSFORM),
           workersAI: Boolean(env.AI),
-          youtubePublishingConfigured: Boolean(env.YOUTUBE_CLIENT_ID && env.YOUTUBE_CLIENT_SECRET && env.YOUTUBE_TOKEN_ENCRYPTION_KEY)
+          youtubePublishingConfigured: Boolean(env.YOUTUBE_CLIENT_ID && env.YOUTUBE_CLIENT_SECRET && env.YOUTUBE_TOKEN_ENCRYPTION_KEY),
+          backgroundRenderRunner: Boolean(env.DB && (env.SOURCE_MEDIA || env.MEDIA))
         }
       });
     }
