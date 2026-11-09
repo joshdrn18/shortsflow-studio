@@ -935,9 +935,10 @@ async function handleBackgroundRender(request,env,url){
  const route=url.pathname;
  if(request.method==="POST"&&route==="/internal/render/claim"){
   const now=new Date(),iso=now.toISOString(),lockUntil=new Date(now.getTime()+45*60*1000).toISOString();
+  await env.DB.prepare("UPDATE clip_render_jobs SET status='cancelled',last_error='Clip settings changed before the background render started.',updated_at=? WHERE status='queued' AND EXISTS(SELECT 1 FROM clip_metadata m WHERE m.clip_id=clip_render_jobs.clip_id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=clip_render_jobs.clip_id) AND m.version<>clip_render_jobs.metadata_version)").bind(iso).run();
   const claimed=await env.DB.prepare(`UPDATE clip_render_jobs SET status='running',runner_id=?,locked_until=?,attempts=attempts+1,updated_at=?
    WHERE id=(SELECT j.id FROM clip_render_jobs j WHERE j.status IN ('queued','running') AND (j.locked_until IS NULL OR j.locked_until<?)
-    AND j.attempts<3 AND EXISTS(SELECT 1 FROM clips c JOIN clip_metadata m ON m.clip_id=c.id AND m.version=j.metadata_version WHERE c.id=j.clip_id)
+    AND j.attempts<3 AND EXISTS(SELECT 1 FROM clips c JOIN clip_metadata m ON m.clip_id=c.id AND m.version=j.metadata_version AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=c.id) WHERE c.id=j.clip_id)
     ORDER BY j.created_at LIMIT 1)
    AND (status='queued' OR locked_until IS NULL OR locked_until<?) RETURNING *`).bind(runner.runnerId,lockUntil,iso,iso,iso).first();
   if(!claimed)return json({ok:true,job:null});
