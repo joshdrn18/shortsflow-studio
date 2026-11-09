@@ -81,7 +81,7 @@ After binding D1 and applying migrations, deploy the Pages project and verify:
 ## Background rendering
 
 - Apply migration `0020_background_render_jobs.sql` to the production D1 database.
-- The GitHub Actions workflow `.github/workflows/background-render.yml` needs `id-token: write`; it runs every five minutes and uses OIDC with audience `shortsflow-render`.
+- The GitHub Actions workflow `.github/workflows/background-render.yml` needs `id-token: write`; it runs every fifteen minutes and uses OIDC with audience `shortsflow-render`.
 - The analysis Worker validates the GitHub OIDC signature and restricts access to this repository, the `main` branch and the background-render workflow. No long-lived GitHub token or R2 credential is stored in GitHub.
 - The runner requires FFmpeg and DejaVu fonts, downloads source media through the authenticated Worker, and uploads the MP4 result through the same Worker.
 
