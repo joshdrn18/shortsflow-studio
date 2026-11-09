@@ -82,4 +82,11 @@ if not health.get("ok") or not health.get("databaseConfigured") or not health.ge
 if "no-store" not in health_headers.get("Cache-Control", "").lower():
     raise SystemExit("API health response is missing no-store cache policy.")
 
+worker_url = "https://shortsflow-analysis-engine.inipastiuy-41f.workers.dev/health"
+worker_status, _, worker_body = get(worker_url)
+worker = json.loads(worker_body)
+if worker_status != 200 or not worker.get("ok") or not worker.get("bindings", {}).get("backgroundRenderRunner"):
+    raise SystemExit("Analysis Worker or background render runner health check failed.")
+
+print("OK: analysis Worker and background render runner are healthy.")
 print(f"OK: production homepage serves build {BUILD}; {len(asset_paths)} frontend assets return HTTP 200 with immutable cache; API, D1 and R2 bindings are healthy.")
