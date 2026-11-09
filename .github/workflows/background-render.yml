@@ -1,0 +1,30 @@
+name: Background video renderer
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: shortsflow-background-renderer
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: Process one queued render
+        env:
+          SHORTSFLOW_RENDER_WORKER: https://shortsflow-analysis-engine.inipastiuy-41f.workers.dev
+        run: python3 scripts/background_render.py
