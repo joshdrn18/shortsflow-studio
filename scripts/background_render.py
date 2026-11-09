@@ -87,7 +87,8 @@ def make_ass(job, path):
         groups.append(group)
     font_scale = max(.82, min(1.65, float(cfg.get("fontSize", 28)) / 28))
     size = max(30, min(76, round(49 * font_scale)))
-    weight = 1 if int(cfg.get("fontWeight", 900)) >= 700 else 0
+    border_style = 3 if background else 1
+    back_colour = "AA000000" if background else "00000000"
     base = ass_color(cfg.get("color", "#ffffff"))
     highlight = ass_color(cfg.get("highlight", "#b59aff"))
     background = int(cfg.get("background", True) is not False)
@@ -95,7 +96,7 @@ def make_ass(job, path):
     frame_y, frame_h = 173, 1574
     edge = max(.05, min(.25, float(cfg.get("edgeOffset", 9)) / 100))
     y = round(frame_y + frame_h * (edge if position == "top" else .5 if position == "center" else 1-edge))
-    style = f"Style: Default,DejaVu Sans,{size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H{ 'AA000000' if background else '00000000'},1,{weight},0,0,100,100,0,0,1,2,1,5,40,40,40,1"
+    style = f"Style: Default,DejaVu Sans,{size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H{back_colour},1,0,0,0,100,100,0,0,{border_style},1,0,5,40,40,40,1"
     lines = ["[Script Info]", "ScriptType: v4.00+", "PlayResX: 1080", "PlayResY: 1920", "WrapStyle: 2", "ScaledBorderAndShadow: yes", "", "[V4+ Styles]", "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding", style, "", "[Events]", "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text"]
     for group in groups:
         plain = " ".join(item["word"] for item in group)
