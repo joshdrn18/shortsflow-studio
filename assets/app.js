@@ -1,4 +1,20 @@
 const $ = (selector) => document.querySelector(selector);
+const escapeHTML = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+}[char]));
+const activityLabels = {
+  "source.uploaded": "Source video uploaded",
+  "job.queued": "AI analysis queued",
+  "job.cancelled": "Analysis cancelled",
+  "job.retried": "Analysis retried",
+  "clip_rendered": "Clip render saved",
+  "clip_edited": "Clip edits saved",
+  "clip_review_approved": "Clip approved",
+  "clip_review_rejected": "Clip rejected",
+  "clip_review_changes_requested": "Changes requested",
+  "youtube_publish_queued": "YouTube upload queued",
+  "youtube.published": "Short published to YouTube"
+};
 const navItems = [...document.querySelectorAll(".nav-item[data-view]")];
 const views = {
   overview: ["Overview", "Your short-form production pipeline, all in one place."],
@@ -118,7 +134,7 @@ $("#start-workflow")?.addEventListener("click", () => {
   navigate("sources");
   $("#source-file")?.click();
 });
-$("#view-activity")?.addEventListener("click", () => toast("No activity has been recorded yet."));
+$("#view-activity")?.addEventListener("click", async () => { await loadWorkspaceSummary(); toast("Recent activity refreshed."); });
 
 let authMode = "login";
 function setAuthMode(mode) {
@@ -196,6 +212,22 @@ async function checkSession() {
     // Keep the dashboard preview available if the API is temporarily unreachable.
   }
 }
+function renderActivity(events) {
+  const panel = $(".empty-activity");
+  if (!panel) return;
+  panel.classList.toggle("has-activity", events.length > 0);
+  if (!events.length) {
+    panel.innerHTML = "<div class='empty-icon'>◷</div><b>No activity yet</b><p>Your production events will appear here when you add your first source video.</p>";
+    return;
+  }
+  panel.innerHTML = `<div class="activity-feed-head"><b>Latest workspace activity</b><span>${events.length} recent events</span></div>
+    <div class="activity-feed-list">${events.map((item) => {
+      const label = activityLabels[item.event] || String(item.event || "Workspace update").replace(/[._-]+/g, " ").replace(/\\b\\w/g, (letter) => letter.toUpperCase());
+      const date = new Date(item.created_at);
+      const timestamp = Number.isNaN(date.getTime()) ? "Time unavailable" : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+      return `<article class="activity-feed-item"><span class="activity-feed-dot"></span><div><b>${escapeHTML(label)}</b><small>${escapeHTML(timestamp)}</small></div></article>`;
+    }).join("")}</div>`;
+}
 async function loadWorkspaceSummary() {
   try {
     const response = await fetch("/api/workspace/summary", { headers: { accept: "application/json" } });
@@ -207,10 +239,7 @@ async function loadWorkspaceSummary() {
     $("#stat-review").textContent = data.stats.awaitingReview;
     $("#stat-published").textContent = data.stats.published;
     $("#review-count").textContent = data.stats.awaitingReview;
-    const activity = $(".empty-activity");
-    if (Array.isArray(data.activity) && data.activity.length && activity) {
-      activity.innerHTML = "<div class='empty-icon'>◷</div><b>" + data.activity.length + " recent events</b><p>Activity history is available in your workspace.</p>";
-    }
+    renderActivity(Array.isArray(data.activity) ? data.activity : []);
   } catch {
     // Keep the empty state when the account or API is not ready.
   }
