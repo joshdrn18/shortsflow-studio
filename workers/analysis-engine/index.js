@@ -903,9 +903,105 @@ async function processBrowserAudioChunk(request, env) {
   return json({ok:true,transcriptId:transcript.id,completed:false,words:combined.length});
 }
 
+
+const RENDER_REPOSITORY="joshdrn18/shortsflow-studio";
+const RENDER_WORKFLOW="joshdrn18/shortsflow-studio/.github/workflows/background-render.yml@refs/heads/main";
+let githubJwksCache=null,githubJwksFetchedAt=0;
+function decodeJwtPart(value){return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(value.replace(/-/g,"+").replace(/_/g,"/")+"=".repeat((4-value.length%4)%4)),c=>c.charCodeAt(0))));}
+async function verifyRenderRunner(request){
+ const token=(request.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"");
+ if(!token)return null;
+ try{
+  const parts=token.split(".");if(parts.length!==3)return null;
+  const header=decodeJwtPart(parts[0]),claims=decodeJwtPart(parts[1]);
+  if(header.alg!=="RS256"||!header.kid||claims.iss!=="https://token.actions.githubusercontent.com")return null;
+  const audiences=Array.isArray(claims.aud)?claims.aud:[claims.aud];
+  if(!audiences.includes("shortsflow-render")||claims.repository!==RENDER_REPOSITORY||claims.ref!=="refs/heads/main"||claims.workflow_ref!==RENDER_WORKFLOW)return null;
+  const now=Math.floor(Date.now()/1000);if(Number(claims.exp)<now||Number(claims.nbf||0)>now+30)return null;
+  if(!githubJwksCache||Date.now()-githubJwksFetchedAt>3600000){
+   const response=await fetch("https://token.actions.githubusercontent.com/.well-known/jwks");if(!response.ok)return null;
+   githubJwksCache=await response.json();githubJwksFetchedAt=Date.now();
+  }
+  const jwk=githubJwksCache.keys?.find(key=>key.kid===header.kid);if(!jwk)return null;
+  const key=await crypto.subtle.importKey("jwk",jwk,{name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["verify"]);
+  const valid=await crypto.subtle.verify("RSASSA-PKCS1-v1_5",key,Uint8Array.from(atob(parts[2].replace(/-/g,"+").replace(/_/g,"/")+"=".repeat((4-parts[2].length%4)%4)),c=>c.charCodeAt(0)),new TextEncoder().encode(parts[0]+"."+parts[1]));
+  return valid?{runnerId:String(claims.run_id||claims.jti||"runner")}:null;
+ }catch(error){console.error("render_runner_oidc_failed",String(error));return null;}
+}
+async function handleBackgroundRender(request,env,url){
+ const runner=await verifyRenderRunner(request);if(!runner)return json({ok:false,error:"Unauthorized render runner."},401);
+ const bucket=env.SOURCE_MEDIA||env.MEDIA;
+ if(!env.DB||!bucket)return json({ok:false,error:"Render database or R2 binding is missing."},503);
+ const route=url.pathname;
+ if(request.method==="POST"&&route==="/internal/render/claim"){
+  const now=new Date(),iso=now.toISOString(),lockUntil=new Date(now.getTime()+45*60*1000).toISOString();
+  const claimed=await env.DB.prepare(`UPDATE clip_render_jobs SET status='running',runner_id=?,locked_until=?,attempts=attempts+1,updated_at=?
+   WHERE id=(SELECT j.id FROM clip_render_jobs j WHERE j.status IN ('queued','running') AND (j.locked_until IS NULL OR j.locked_until<?)
+    AND j.attempts<3 AND EXISTS(SELECT 1 FROM clips c JOIN clip_metadata m ON m.clip_id=c.id AND m.version=j.metadata_version WHERE c.id=j.clip_id)
+    ORDER BY j.created_at LIMIT 1)
+   AND (status='queued' OR locked_until IS NULL OR locked_until<?) RETURNING *`).bind(runner.runnerId,lockUntil,iso,iso,iso).first();
+  if(!claimed)return json({ok:true,job:null});
+  const data=await env.DB.prepare(`SELECT j.id,j.workspace_id,j.clip_id,j.source_video_id,j.metadata_version,
+    c.start_seconds,c.end_seconds,s.storage_key AS source_key,s.mime_type AS source_mime,s.size_bytes AS source_size,
+    m.title,m.caption,m.hashtags,m.language,m.subtitle_config_json,
+    t.segments_json,t.language AS transcript_language,
+    ws.watermark_enabled,ws.watermark_text,ws.watermark_position,ws.watermark_opacity,ws.watermark_scale
+   FROM clip_render_jobs j JOIN clips c ON c.id=j.clip_id JOIN source_videos s ON s.id=j.source_video_id
+   JOIN clip_metadata m ON m.clip_id=c.id AND m.version=j.metadata_version
+   LEFT JOIN source_transcripts t ON t.source_video_id=j.source_video_id AND t.workspace_id=j.workspace_id
+    AND t.version=(SELECT MAX(t2.version) FROM source_transcripts t2 WHERE t2.source_video_id=t.source_video_id)
+   LEFT JOIN workspace_settings ws ON ws.workspace_id=j.workspace_id
+   WHERE j.id=? AND j.runner_id=? AND j.status='running'`).bind(claimed.id,runner.runnerId).first();
+  if(!data||!data.source_key){await env.DB.prepare("UPDATE clip_render_jobs SET status='failed',last_error='Private source video is missing.',updated_at=? WHERE id=?").bind(iso,claimed.id).run();return json({ok:false,error:"Source video is missing."},404);}
+  let words=[];try{words=JSON.parse(data.segments_json||"[]");}catch{}
+  words=(Array.isArray(words)?words:[]).filter(w=>w&&typeof w.word==="string"&&Number.isFinite(Number(w.start))&&Number.isFinite(Number(w.end))&&Number(w.end)>Number(data.start_seconds)&&Number(w.start)<Number(data.end_seconds)).slice(0,10000).map(w=>({word:w.word,start:Math.max(0,Number(w.start)-Number(data.start_seconds)),end:Math.max(0,Number(w.end)-Number(data.start_seconds))}));
+  let config={};try{config=JSON.parse(data.subtitle_config_json||"{}");}catch{}
+  return json({ok:true,job:{id:data.id,workspaceId:data.workspace_id,clipId:data.clip_id,sourceId:data.source_video_id,metadataVersion:Number(data.metadata_version),sourceKey:data.source_key,sourceMime:data.source_mime,sourceSize:Number(data.source_size||0),startSeconds:Number(data.start_seconds),endSeconds:Number(data.end_seconds),title:data.title||"",caption:data.caption||"",hashtags:data.hashtags||"",language:data.language||"",words,subtitleConfig:config,watermark:{watermarkEnabled:data.watermark_enabled===null?true:Boolean(data.watermark_enabled),watermarkText:data.watermark_text||"YOUR BRAND",watermarkPosition:data.watermark_position||"bottom-right",watermarkOpacity:Number(data.watermark_opacity??0.72),watermarkScale:data.watermark_scale||"medium"}}});
+ }
+ const jobId=url.searchParams.get("jobId")||"";
+ if(!/^[0-9a-f-]{36}$/i.test(jobId))return json({ok:false,error:"Invalid render job ID."},400);
+ const job=await env.DB.prepare("SELECT * FROM clip_render_jobs WHERE id=? AND status='running' AND runner_id=?").bind(jobId,runner.runnerId).first();
+ if(!job)return json({ok:false,error:"Render job is no longer owned by this runner."},409);
+ if(request.method==="GET"&&route==="/internal/render/source"){
+  const row=await env.DB.prepare("SELECT storage_key FROM source_videos WHERE id=? AND workspace_id=?").bind(job.source_video_id,job.workspace_id).first();
+  const object=row?.storage_key?await bucket.get(row.storage_key):null;if(!object)return json({ok:false,error:"Source video is missing from R2."},404);
+  return new Response(object.body,{headers:{"Content-Type":object.httpMetadata?.contentType||"application/octet-stream","Content-Length":String(object.size),"Cache-Control":"no-store"}});
+ }
+ if(request.method==="POST"&&route==="/internal/render/complete"){
+  const type=(request.headers.get("Content-Type")||"").split(";")[0].trim().toLowerCase();
+  const size=Number(request.headers.get("Content-Length")||0);
+  if(type!=="video/mp4"||!Number.isSafeInteger(size)||size<1024||size>90*1024*1024||!request.body)return json({ok:false,error:"Render must be a valid MP4 between 1 KB and 90 MB."},413);
+  const latest=await env.DB.prepare("SELECT MAX(version) AS version FROM clip_metadata WHERE clip_id=?").bind(job.clip_id).first();
+  if(Number(latest?.version)!==Number(job.metadata_version))return json({ok:false,error:"Clip metadata changed. Queue a new render."},409);
+  const assetId=crypto.randomUUID(),key=`workspaces/${job.workspace_id}/clips/${job.clip_id}/renders/${assetId}.mp4`,now=new Date().toISOString();
+  await bucket.put(key,request.body,{httpMetadata:{contentType:"video/mp4"},customMetadata:{workspaceId:job.workspace_id,clipId:job.clip_id,metadataVersion:String(job.metadata_version),assetId,renderJobId:job.id}});
+  const stored=await bucket.head(key);if(!stored||Number(stored.size)!==size){await bucket.delete(key);return json({ok:false,error:"R2 background render verification failed."},500);}
+  const result=await env.DB.batch([
+   env.DB.prepare(`INSERT INTO clip_assets(id,clip_id,asset_type,storage_key,mime_type,size_bytes,version,metadata_version,created_at)
+    SELECT ?,?,'render',?,'video/mp4',?,(SELECT COALESCE(MAX(version),0)+1 FROM clip_assets WHERE clip_id=? AND asset_type='render'),?,?
+    WHERE (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?`).bind(assetId,job.clip_id,key,size,job.clip_id,job.metadata_version,now,job.clip_id,job.metadata_version),
+   env.DB.prepare("UPDATE clip_render_jobs SET status='completed',asset_id=?,last_error=NULL,locked_until=NULL,runner_id=NULL,completed_at=?,updated_at=? WHERE id=? AND status='running' AND runner_id=?").bind(assetId,now,now,job.id,runner.runnerId),
+   env.DB.prepare("UPDATE clips SET status='rendered',updated_at=? WHERE id=? AND workspace_id=? AND (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?").bind(now,job.clip_id,job.workspace_id,job.clip_id,job.metadata_version),
+   env.DB.prepare("INSERT INTO activity_logs(id,workspace_id,entity_type,entity_id,event,details,created_at) VALUES(?,?, 'clip',?,'clip_rendered',?,?)").bind(crypto.randomUUID(),job.workspace_id,job.clip_id,JSON.stringify({jobId:job.id,assetId,metadataVersion:Number(job.metadata_version),sizeBytes:size,format:"mp4",engine:"background-ffmpeg"}),now)
+  ]);
+  if(Number(result[0]?.meta?.changes||0)!==1){await bucket.delete(key);return json({ok:false,error:"Clip changed while saving the background render."},409);}
+  return json({ok:true,assetId,sizeBytes:size,mimeType:"video/mp4"});
+ }
+ if(request.method==="POST"&&route==="/internal/render/fail"){
+  const body=await request.json().catch(()=>({})),message=String(body.error||"Background rendering failed.").slice(0,1000),now=new Date().toISOString();
+  await env.DB.batch([
+   env.DB.prepare("UPDATE clip_render_jobs SET status='failed',last_error=?,locked_until=NULL,runner_id=NULL,updated_at=? WHERE id=? AND status='running' AND runner_id=?").bind(message,now,job.id,runner.runnerId),
+   env.DB.prepare("UPDATE clips SET status='editing',updated_at=? WHERE id=? AND workspace_id=? AND status='rendering'").bind(now,job.clip_id,job.workspace_id)
+  ]);
+  return json({ok:true});
+ }
+ return json({ok:false,error:"Not found."},404);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/internal/render/")) return handleBackgroundRender(request, env, url);
     if (request.method === "POST" && url.pathname === "/internal/transcribe-chunk") return processBrowserAudioChunk(request, env);
     if (request.method === "GET" && url.pathname === "/health") {
       return json({
