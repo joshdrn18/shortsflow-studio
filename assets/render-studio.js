@@ -154,7 +154,7 @@
   history.dataset.clipId=clipId;
  }
  async function render(){
-  if(busy)return;const clip=window.__shortsflowActiveClip,v=$("#clip-preview-video"),btn=$("#clip-render-btn"),msg=$("#clip-render-message");if(!clip?.id||!v||!btn)return;ensureCleanupButton(msg,clip.id);
+  if(busy)return;const clip=window.__shortsflowActiveClip;let v=$("#clip-preview-video"),renderObjectUrl=null;const btn=$("#clip-render-btn"),msg=$("#clip-render-message");if(!clip?.id||!v||!btn)return;ensureCleanupButton(msg,clip.id);
   if(!window.MediaRecorder||!v.captureStream||!HTMLCanvasElement.prototype.captureStream){msg.textContent="Browser rendering requires the latest Chrome or Edge.";return;}
   const current=window.__shortsflowActiveClip;
   const changedCut=Math.abs(Number(window.__shortsflowClipStart)-Number(clip.startSeconds))>.05||Math.abs(Number(window.__shortsflowClipEnd)-Number(clip.endSeconds))>.05;
@@ -169,8 +169,18 @@
    if(task.cancelled)return;
    const c=sub.clip,start=Number(c.startSeconds),end=Number(c.endSeconds),duration=end-start,mv=Number(c.metadataVersion);
    if(!mv||duration<1||duration>180)throw new Error("Save the clip cut and subtitle style first. Clip duration must be 1–180 seconds.");
-   if(v.readyState<2||!v.videoWidth)throw new Error("Wait until the source video preview is ready.");
    if(v.currentSrc&&!v.currentSrc.includes(encodeURIComponent(c.sourceId)))throw new Error("This preview is not showing the selected clip source. Close and reopen it.");
+   msg.textContent="Preparing a local copy of the source video…";
+   const sourceResponse=await fetch("/api/sources/"+encodeURIComponent(c.sourceId),{cache:"no-store",credentials:"same-origin"});
+   if(!sourceResponse.ok)throw new Error("Could not download the private source video ("+sourceResponse.status+"). Reopen the preview and retry.");
+   const declaredSize=Number(sourceResponse.headers.get("Content-Length")||0);
+   if(declaredSize>200*1024*1024)throw new Error("Source exceeds the 200 MB browser-render limit.");
+   const sourceBlob=await sourceResponse.blob();
+   if(!sourceBlob.size||sourceBlob.size>200*1024*1024)throw new Error("The downloaded source is empty or exceeds the 200 MB browser-render limit.");
+   renderObjectUrl=URL.createObjectURL(sourceBlob);
+   const localVideo=document.createElement("video");localVideo.preload="auto";localVideo.playsInline=true;localVideo.muted=false;localVideo.src=renderObjectUrl;
+   await new Promise((resolve,reject)=>{let settled=false;const finish=error=>{if(settled)return;settled=true;clearTimeout(timer);localVideo.removeEventListener("loadeddata",ready);localVideo.removeEventListener("error",failed);error?reject(error):resolve();};const ready=()=>{if(localVideo.videoWidth>0&&localVideo.readyState>=2)finish();};const failed=()=>finish(new Error("The local source copy could not be decoded by this browser. Try an MP4 encoded with H.264 video and AAC audio."));const timer=setTimeout(()=>finish(new Error("The local source copy took too long to prepare. Check available memory and retry.")),90000);localVideo.addEventListener("loadeddata",ready);localVideo.addEventListener("error",failed);localVideo.load();});
+   v=localVideo;
    const canvas=document.createElement("canvas");canvas.width=1080;canvas.height=1920;const ctx=canvas.getContext("2d",{alpha:false});
    canvasStream=canvas.captureStream(30);sourceStream=v.captureStream();const tracks=[...canvasStream.getVideoTracks(),...sourceStream.getAudioTracks()];if(!tracks.length)throw new Error("Could not capture video/audio tracks.");
    const stream=new MediaStream(tracks),types=["video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"],mime=types.find(x=>MediaRecorder.isTypeSupported(x));if(!mime)throw new Error("No supported WebM encoder found in this browser.");
@@ -215,7 +225,7 @@
    const link=document.createElement("a");link.href=result.asset.url;link.target="_blank";link.rel="noopener";link.textContent="Open rendered video ↗";msg.append(link);
    btn.textContent="Render again";
   }catch(e){if(!task.cancelled){msg.textContent=e.message||"Render failed. Retry.";btn.textContent="Retry render";}}
-  finally{if(renderWatchdog)clearTimeout(renderWatchdog);if(typeof stallTimer!=="undefined"&&stallTimer)clearInterval(stallTimer);if(typeof onWaiting==="function"){v.removeEventListener("waiting",onWaiting);v.removeEventListener("stalled",onWaiting);}if(typeof onPlaying==="function")v.removeEventListener("playing",onPlaying);stopped=true;cancelAnimationFrame(frame);try{v.playbackRate=originalPlaybackRate||1;}catch{}if(xhr&&xhr.readyState!==XMLHttpRequest.DONE){try{xhr.abort();}catch{}}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(sourceStream)sourceStream.getTracks().forEach(t=>t.stop());cancelBtn.remove();if(activeCancel===task)activeCancel=null;busy=false;btn.disabled=false;}
+  finally{if(renderWatchdog)clearTimeout(renderWatchdog);if(typeof stallTimer!=="undefined"&&stallTimer)clearInterval(stallTimer);if(typeof onWaiting==="function"){v.removeEventListener("waiting",onWaiting);v.removeEventListener("stalled",onWaiting);}if(typeof onPlaying==="function")v.removeEventListener("playing",onPlaying);stopped=true;cancelAnimationFrame(frame);try{v.playbackRate=originalPlaybackRate||1;}catch{}if(xhr&&xhr.readyState!==XMLHttpRequest.DONE){try{xhr.abort();}catch{}}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(sourceStream)sourceStream.getTracks().forEach(t=>t.stop());if(renderObjectUrl)URL.revokeObjectURL(renderObjectUrl);cancelBtn.remove();if(activeCancel===task)activeCancel=null;busy=false;btn.disabled=false;}
  }
  document.addEventListener("click",e=>{if(e.target.closest("#clip-render-btn"))render();});
 })();
