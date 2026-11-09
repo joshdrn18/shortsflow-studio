@@ -48,5 +48,6 @@ if omitted:
 if f"UI build {BUILD}" not in html:
     raise SystemExit("Visible UI build marker is missing.")
 compile((ROOT / "scripts/background_render.py").read_text(encoding="utf-8"), "scripts/background_render.py", "exec")
+compile((ROOT / "scripts/test_background_render.py").read_text(encoding="utf-8"), "scripts/test_background_render.py", "exec")
 print("OK: background FFmpeg runner Python syntax is valid.")
 print(f"OK: {len(parser.paths)} linked assets exist; cache versions match {BUILD}; all {len(actual)} JavaScript files are syntax-checked.")
