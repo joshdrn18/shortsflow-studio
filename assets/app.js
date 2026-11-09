@@ -222,7 +222,7 @@ function renderActivity(events) {
   }
   panel.innerHTML = `<div class="activity-feed-head"><b>Latest workspace activity</b><span>${events.length} recent events</span></div>
     <div class="activity-feed-list">${events.map((item) => {
-      const label = activityLabels[item.event] || String(item.event || "Workspace update").replace(/[._-]+/g, " ").replace(/\\b\\w/g, (letter) => letter.toUpperCase());
+      const label = activityLabels[item.event] || String(item.event || "Workspace update").replace(/[._-]+/g, " ").split(" ").map((word) => word ? word[0].toUpperCase() + word.slice(1) : "").join(" ");
       const date = new Date(item.created_at);
       const timestamp = Number.isNaN(date.getTime()) ? "Time unavailable" : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
       return `<article class="activity-feed-item"><span class="activity-feed-dot"></span><div><b>${escapeHTML(label)}</b><small>${escapeHTML(timestamp)}</small></div></article>`;
