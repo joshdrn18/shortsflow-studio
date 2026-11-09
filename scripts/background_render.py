@@ -85,7 +85,8 @@ def make_ass(job, path):
         group.append(item)
     if group:
         groups.append(group)
-    size = max(30, min(76, round(49 * max(.82, min(1.65, float(cfg.get("fontSize", 28)) / 28))))
+    font_scale = max(.82, min(1.65, float(cfg.get("fontSize", 28)) / 28))
+    size = max(30, min(76, round(49 * font_scale)))
     weight = 1 if int(cfg.get("fontWeight", 900)) >= 700 else 0
     base = ass_color(cfg.get("color", "#ffffff"))
     highlight = ass_color(cfg.get("highlight", "#b59aff"))
