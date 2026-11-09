@@ -200,7 +200,7 @@
     v.addEventListener("waiting",onWaiting);v.addEventListener("stalled",onWaiting);v.addEventListener("playing",onPlaying);document.addEventListener("visibilitychange",onVisibilityChange);
     stallTimer=setInterval(progressCheck,3000);
     const watchdogPromise=new Promise((_,reject)=>{watchdogReject=reject;});armWatchdog();
-    recorder.start(1000);await v.play();v.muted=false;frame=requestAnimationFrame(draw);await Promise.race([done,watchdogPromise]);if(frameError)throw new Error("Render frame failed: "+frameError.message);if(renderWatchdog){clearTimeout(renderWatchdog);renderWatchdog=null;}if(stallTimer)clearInterval(stallTimer);v.removeEventListener("waiting",onWaiting);v.removeEventListener("stalled",onWaiting);if(task.cancelled)return;
+    recorder.start(1000);await v.play();v.muted=false;if(!frame)frame=requestAnimationFrame(draw);await Promise.race([done,watchdogPromise]);if(frameError)throw new Error("Render frame failed: "+frameError.message);if(renderWatchdog){clearTimeout(renderWatchdog);renderWatchdog=null;}if(stallTimer)clearInterval(stallTimer);v.removeEventListener("waiting",onWaiting);v.removeEventListener("stalled",onWaiting);if(task.cancelled)return;
    if(performance.now()-started<500)throw new Error("The source did not play long enough. Retry.");
    const blob=new Blob(chunks,{type:"video/webm"});if(blob.size<1024)throw new Error("Render output is empty. Check source playback and retry.");if(blob.size>90*1024*1024)throw new Error("Render exceeds the 90 MB limit. Try a shorter clip.");
    if(task.cancelled)return;
