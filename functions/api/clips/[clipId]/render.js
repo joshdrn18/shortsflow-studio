@@ -34,21 +34,24 @@ export async function onRequestPost({request,env,params}){
  if(!Number.isSafeInteger(declaredSize)||declaredSize<1024)return json({ok:false,error:"A valid Content-Length is required for secure R2 streaming."},411);
  if(declaredSize>MAX)return json({ok:false,error:"Rendered file exceeds the 90 MB storage limit."},413);
  if(!request.body)return json({ok:false,error:"Rendered file is empty."},400);
- let key=null;
+ let key=null,stage="checking clip";
  try{
   const clip=await env.DB.prepare(`SELECT c.id,m.version AS metadata_version FROM clips c LEFT JOIN clip_metadata m ON m.clip_id=c.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=c.id) WHERE c.id=? AND c.workspace_id=?`).bind(id,user.workspace.id).first();
   if(!clip)return json({ok:false,error:"Clip not found in this workspace."},404);
   if(Number(clip.metadata_version)!==mv)return json({ok:false,error:"Clip settings changed. Refresh the editor and render the latest version."},409);
+  stage="uploading video to R2";
   const size=declaredSize;
   const assetId=crypto.randomUUID();key=`workspaces/${user.workspace.id}/clips/${id}/renders/${assetId}.webm`;
   // Stream the incoming request body straight to R2. Avoid FixedLengthStream's
   // dual pipe/put lifecycle: a rejected destination can otherwise leave the
   // request pipe pending and make a successful browser upload look like a save failure.
   await env.MEDIA.put(key,request.body,{httpMetadata:{contentType:"video/webm"},customMetadata:{workspaceId:user.workspace.id,clipId:id,metadataVersion:String(mv),assetId}});
+  stage="verifying uploaded video in R2";
   const stored = await env.MEDIA.head(key);
   if (!stored || Number(stored.size) !== size) {
    throw new Error("R2 upload verification failed. The stored file size does not match the render.");
   }
+  stage="saving render record in D1";
   const now=new Date().toISOString();
   const saved = await env.DB.batch([
    env.DB.prepare("INSERT INTO clip_assets (id,clip_id,asset_type,storage_key,mime_type,size_bytes,version,metadata_version,created_at) SELECT ?,?,'render',?,'video/webm',?,(SELECT COALESCE(MAX(version),0)+1 FROM clip_assets WHERE clip_id=? AND asset_type='render'),?,?,? WHERE (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?").bind(assetId,id,key,size,id,mv,now,id,mv),
@@ -56,8 +59,9 @@ export async function onRequestPost({request,env,params}){
    env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) SELECT ?,?, 'clip',?,'clip_rendered',json_object('assetVersion',(SELECT version FROM clip_assets WHERE id=?),'metadataVersion',?,'sizeBytes',?,'format','webm'),? WHERE EXISTS (SELECT 1 FROM clip_assets WHERE id=?)").bind(crypto.randomUUID(),user.workspace.id,id,assetId,mv,size,now,assetId)
   ]);
   if (Number(saved[0]?.meta?.changes || 0) !== 1) throw new Error("Clip settings changed while rendering. Please render the latest version again.");
+  stage="verifying saved render record";
   const asset=await env.DB.prepare("SELECT version FROM clip_assets WHERE id=? AND clip_id=?").bind(assetId,id).first();
   if(!asset)throw new Error("The rendered asset could not be verified after saving.");
   return json({ok:true,asset:{id:assetId,version:Number(asset.version),metadataVersion:mv,sizeBytes:size,mimeType:"video/webm",url:`/api/clips/${id}/render`}},201);
- }catch(e){if(key){try{await env.MEDIA.delete(key);}catch{}}console.error("render_upload_failed",e);const msg=String(e?.message||"");return json({ok:false,error:msg.includes("90 MB")?msg:"Could not save the rendered video. Please retry."},msg.includes("90 MB")?413:500);}
+ }catch(e){if(key){try{await env.MEDIA.delete(key);}catch{}}console.error("render_upload_failed",{stage,error:String(e?.message||e)});const msg=String(e?.message||"Unknown error").replace(/[\\r\\n]+/g," ").slice(0,220);const tooLarge=msg.includes("90 MB");return json({ok:false,error:tooLarge?msg:`Could not save render during ${stage}. ${msg}`},tooLarge?413:500);}
 }
