@@ -2,7 +2,6 @@ from html.parser import HTMLParser
 from pathlib import Path
 import json
 import re
-import shlex
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = "20261109-audit-1"
