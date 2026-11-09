@@ -154,7 +154,7 @@
   history.dataset.clipId=clipId;
  }
  async function render(){
-  if(busy)return;const clip=window.__shortsflowActiveClip;let v=$("#clip-preview-video"),renderObjectUrl=null;const btn=$("#clip-render-btn"),msg=$("#clip-render-message");if(!clip?.id||!v||!btn)return;ensureCleanupButton(msg,clip.id);
+  if(busy)return false;window.__shortsflowRenderSucceeded=false;const clip=window.__shortsflowActiveClip;let v=$("#clip-preview-video"),renderObjectUrl=null;const btn=$("#clip-render-btn"),msg=$("#clip-render-message");if(!clip?.id||!v||!btn)return;ensureCleanupButton(msg,clip.id);
   if(!window.MediaRecorder||!v.captureStream||!HTMLCanvasElement.prototype.captureStream){msg.textContent="Browser rendering requires the latest Chrome or Edge.";return;}
   const current=window.__shortsflowActiveClip;
   const changedCut=Math.abs(Number(window.__shortsflowClipStart)-Number(clip.startSeconds))>.05||Math.abs(Number(window.__shortsflowClipEnd)-Number(clip.endSeconds))>.05;
@@ -223,9 +223,10 @@
    msg.replaceChildren();
    msg.append(document.createTextNode("Render saved · WebM · "+(result.asset.sizeBytes/1048576).toFixed(1)+" MB · "));
    const link=document.createElement("a");link.href=result.asset.url;link.target="_blank";link.rel="noopener";link.textContent="Open rendered video ↗";msg.append(link);
-   btn.textContent="Render again";
-  }catch(e){if(!task.cancelled){msg.textContent=e.message||"Render failed. Retry.";btn.textContent="Retry render";}}
+   btn.textContent="Render again";window.__shortsflowRenderSucceeded=true;
+  }catch(e){if(!task.cancelled){msg.textContent=e.message||"Render failed. Retry.";btn.textContent="Retry render";}window.__shortsflowRenderSucceeded=false;}
   finally{if(renderWatchdog)clearTimeout(renderWatchdog);if(typeof stallTimer!=="undefined"&&stallTimer)clearInterval(stallTimer);if(typeof onWaiting==="function"){v.removeEventListener("waiting",onWaiting);v.removeEventListener("stalled",onWaiting);}if(typeof onPlaying==="function")v.removeEventListener("playing",onPlaying);stopped=true;cancelAnimationFrame(frame);try{v.playbackRate=originalPlaybackRate||1;}catch{}if(xhr&&xhr.readyState!==XMLHttpRequest.DONE){try{xhr.abort();}catch{}}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(sourceStream)sourceStream.getTracks().forEach(t=>t.stop());if(renderObjectUrl)URL.revokeObjectURL(renderObjectUrl);cancelBtn.remove();if(activeCancel===task)activeCancel=null;busy=false;btn.disabled=false;}
  }
+ window.__shortsflowRenderActiveClip=async()=>{await render();return window.__shortsflowRenderSucceeded===true;};
  document.addEventListener("click",e=>{if(e.target.closest("#clip-render-btn"))render();});
 })();
