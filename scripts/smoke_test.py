@@ -23,7 +23,8 @@ class Assets(HTMLParser):
             self.urls.append(attrs["href"])
 
 def get(path):
-    request = Request(BASE_URL + path, headers={
+    target = path if urlsplit(path).scheme else BASE_URL + path
+    request = Request(target, headers={
         "User-Agent": "ShortsFlow-production-smoke-test",
         "Cache-Control": "no-cache",
         "Accept": "application/json,text/html,*/*",
