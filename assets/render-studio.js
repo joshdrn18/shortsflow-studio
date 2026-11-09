@@ -162,9 +162,7 @@
   const changedMeta=$("#clip-edit-title")?.value.trim()!==(clip.title||"")||$("#clip-edit-caption")?.value.trim()!==(clip.caption||"")||$("#clip-edit-hashtags")?.value.trim()!==(clip.hashtags||"")||$("#clip-edit-language")?.value.trim()!==(clip.language||"");
   if(changedCut||changedMeta||window.__shortsflowSubtitleDirty||window.__shortsflowWatermarkDirty){msg.textContent="Save your clip edits, subtitle style and watermark settings first, then queue the background render.";return false;}
   busy=true;btn.disabled=true;btn.textContent="Queueing…";
-  const subtitleData=await getJson("/api/clips/"+encodeURIComponent(clip.id)+"/subtitles");
-  const metadataVersion=Number(subtitleData.clip?.metadataVersion);
-  if(!Number.isSafeInteger(metadataVersion)||metadataVersion<1)throw new Error("Could not verify the latest clip settings before rendering.");
+  let metadataVersion=0;
   const statusUrl="/api/clips/"+encodeURIComponent(clip.id)+"/render-jobs";
   const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const showAsset=asset=>{
@@ -192,7 +190,7 @@
     job=data.job;
     if(job&&job.status==="completed"&&job.asset){showAsset(job.asset);return true;}
     if(job&&job.status==="failed")throw new Error(job.error||"Background rendering failed. You can retry safely.");
-    if(job&&Number(job.metadataVersion)!==Number(clip.metadataVersion))throw new Error("Clip settings changed while rendering. Save the latest edits and queue a new render.");
+    if(job&&Number(job.metadataVersion)!==metadataVersion)throw new Error("Clip settings changed while rendering. Save the latest edits and queue a new render.");
     if(job?.status==="queued")msg.textContent="Waiting for the background FFmpeg runner… You can close this tab safely.";
     else if(job?.status==="running")msg.textContent="Rendering on the background server… This continues even when ShortsFlow is closed.";
    }
