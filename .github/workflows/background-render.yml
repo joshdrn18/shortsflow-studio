@@ -26,6 +26,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: Test the FFmpeg pipeline on pushes
+        if: github.event_name == 'push'
+        run: python3 scripts/test_background_render.py
       - name: Process one queued render
         env:
           SHORTSFLOW_RENDER_WORKER: https://shortsflow-analysis-engine.inipastiuy-41f.workers.dev
