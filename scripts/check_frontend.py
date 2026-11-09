@@ -1,7 +1,7 @@
 from html.parser import HTMLParser
 from pathlib import Path
 import json
-import re
+import shlex
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = "20261109-audit-1"
@@ -38,7 +38,7 @@ if unversioned:
 
 package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
 command = package["scripts"]["check:js"]
-checked = set(re.findall(r"node --check '([^']+\.js)'", command))
+checked = {shlex.split(part)[-1] for part in command.split("&&") if "node --check" in part}
 actual = {str(path.relative_to(ROOT)) for path in (ROOT / "assets").glob("*.js")}
 actual |= {str(path.relative_to(ROOT)) for path in (ROOT / "functions").rglob("*.js")}
 actual |= {str(path.relative_to(ROOT)) for path in (ROOT / "workers").rglob("*.js")}
