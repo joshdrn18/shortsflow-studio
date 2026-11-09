@@ -39,15 +39,12 @@ export async function onRequestPost({request,env,params}){
   const clip=await env.DB.prepare(`SELECT c.id,m.version AS metadata_version FROM clips c LEFT JOIN clip_metadata m ON m.clip_id=c.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=c.id) WHERE c.id=? AND c.workspace_id=?`).bind(id,user.workspace.id).first();
   if(!clip)return json({ok:false,error:"Clip not found in this workspace."},404);
   if(Number(clip.metadata_version)!==mv)return json({ok:false,error:"Clip settings changed. Refresh the editor and render the latest version."},409);
-  const size=declaredSize,fixed=new FixedLengthStream(size);
+  const size=declaredSize;
   const assetId=crypto.randomUUID();key=`workspaces/${user.workspace.id}/clips/${id}/renders/${assetId}.webm`;
-  const pipePromise=request.body.pipeTo(fixed.writable);
-  const putPromise=env.MEDIA.put(key,fixed.readable,{httpMetadata:{contentType:"video/webm"},customMetadata:{workspaceId:user.workspace.id,clipId:id,metadataVersion:String(mv),assetId}});
-  // Wait for both sides to settle before cleanup; otherwise a rejected pipe can
-  // race a still-running R2 put and leave an orphan object behind.
-  const transfer = await Promise.allSettled([pipePromise, putPromise]);
-  const transferError = transfer.find(item => item.status === "rejected");
-  if (transferError) throw transferError.reason || new Error("Render transfer failed.");
+  // Stream the incoming request body straight to R2. Avoid FixedLengthStream's
+  // dual pipe/put lifecycle: a rejected destination can otherwise leave the
+  // request pipe pending and make a successful browser upload look like a save failure.
+  await env.MEDIA.put(key,request.body,{httpMetadata:{contentType:"video/webm"},customMetadata:{workspaceId:user.workspace.id,clipId:id,metadataVersion:String(mv),assetId}});
   const stored = await env.MEDIA.head(key);
   if (!stored || Number(stored.size) !== size) {
    throw new Error("R2 upload verification failed. The stored file size does not match the render.");
