@@ -980,8 +980,8 @@ async function handleBackgroundRender(request,env,url){
    env.DB.prepare(`INSERT INTO clip_assets(id,clip_id,asset_type,storage_key,mime_type,size_bytes,version,metadata_version,created_at)
     SELECT ?,?,'render',?,'video/mp4',?,(SELECT COALESCE(MAX(version),0)+1 FROM clip_assets WHERE clip_id=? AND asset_type='render'),?,?
     WHERE (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?`).bind(assetId,job.clip_id,key,size,job.clip_id,job.metadata_version,now,job.clip_id,job.metadata_version),
-   env.DB.prepare("UPDATE clip_render_jobs SET status='completed',asset_id=?,last_error=NULL,locked_until=NULL,runner_id=NULL,completed_at=?,updated_at=? WHERE id=? AND status='running' AND runner_id=?").bind(assetId,now,now,job.id,runner.runnerId),
-   env.DB.prepare("UPDATE clips SET status='rendered',updated_at=? WHERE id=? AND workspace_id=? AND (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?").bind(now,job.clip_id,job.workspace_id,job.clip_id,job.metadata_version),
+   env.DB.prepare("UPDATE clip_render_jobs SET status='completed',asset_id=?,last_error=NULL,locked_until=NULL,runner_id=NULL,completed_at=?,updated_at=? WHERE id=? AND status='running' AND runner_id=? AND EXISTS(SELECT 1 FROM clip_assets WHERE id=?)").bind(assetId,now,now,job.id,runner.runnerId,assetId),
+   env.DB.prepare("UPDATE clips SET status='rendered',updated_at=? WHERE id=? AND workspace_id=? AND (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=? AND EXISTS(SELECT 1 FROM clip_assets WHERE id=?)").bind(now,job.clip_id,job.workspace_id,job.clip_id,job.metadata_version,assetId),
    env.DB.prepare("INSERT INTO activity_logs(id,workspace_id,entity_type,entity_id,event,details,created_at) VALUES(?,?, 'clip',?,'clip_rendered',?,?)").bind(crypto.randomUUID(),job.workspace_id,job.clip_id,JSON.stringify({jobId:job.id,assetId,metadataVersion:Number(job.metadata_version),sizeBytes:size,format:"mp4",engine:"background-ffmpeg"}),now)
   ]);
   if(Number(result[0]?.meta?.changes||0)!==1){await bucket.delete(key);return json({ok:false,error:"Clip changed while saving the background render."},409);}
