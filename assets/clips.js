@@ -62,6 +62,9 @@
     const dialog=$("#clip-preview-dialog"),video=$("#clip-preview-video");video.pause();video.removeAttribute("src");video.load();activeClip=null;window.__shortsflowActiveClip=null;
     if(dialog?.close)dialog.close();else dialog?.removeAttribute("open");
   }
+  window.__shortsflowOpenClipPreview=clip=>new Promise((resolve,reject)=>{
+    try{openClipPreview(clip);const video=$("#clip-preview-video");if(video.readyState>=1){resolve(true);return;}const timer=setTimeout(()=>{video.removeEventListener("loadedmetadata",ready);reject(new Error("Clip preview could not load in time."));},30000);const ready=()=>{clearTimeout(timer);video.removeEventListener("loadedmetadata",ready);resolve(true);};video.addEventListener("loadedmetadata",ready,{once:true});video.addEventListener("error",()=>{clearTimeout(timer);reject(new Error("Source preview could not be decoded."));},{once:true});}catch(error){reject(error);}
+  });
   function openClipPreview(clip){
     activeClip=clip;clipStart=Number(clip.startSeconds)||0;clipEnd=Number(clip.endSeconds)||clipStart+1;window.__shortsflowActiveClip=clip;window.__shortsflowClipStart=clipStart;window.__shortsflowClipEnd=clipEnd;
     const video=$("#clip-preview-video");video.pause();video.removeAttribute("src");video.load();
