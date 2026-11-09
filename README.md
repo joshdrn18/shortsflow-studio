@@ -25,28 +25,17 @@ Heavy video processing will not run inside request-bound Pages Functions. A sepa
 
 ## Current implementation
 
-- Responsive dashboard shell and navigation
-- API health endpoint: `GET /api/health`
-- Account registration: `POST /api/auth/register`
-- Account login: `POST /api/auth/login`
-- Current session: `GET /api/auth/me`
-- Logout: `POST /api/auth/logout`
-- PBKDF2-SHA-256 password hashing (100,000 iterations)
-- Random opaque session tokens stored as SHA-256 hashes; HttpOnly, Secure, SameSite=Lax cookie; 7-day expiry
-- Login attempt throttling by account email
-- Workspace created for each new account
-- D1 schema and ordered migrations, including workspace watermark settings
-- Authenticated source-video upload to private R2 (MP4, MOV, WebM, MKV, OGG; 90 MB endpoint limit)
-- Workspace-scoped source-video listing and private streaming preview API with HTTP byte-range support
-- Source preview player in the Sources workspace
-- Persistent, workspace-scoped processing job queue for source-analysis requests, with safe cancellation of queued jobs and manual retry of failed jobs
-- Scheduled analysis Worker using Cloudflare Media Transformations (beta) to extract audio from private R2 MP4 sources, Workers AI Whisper for timestamped transcription, and an 8B instruction model to rank clip candidates
-- Workspace-scoped Clip Discovery API and candidate list with AI score, hook, transcript excerpt, timestamps, caption and hashtags
-- Secure workspace-scoped transcript viewer with timestamped WebVTT export
-- Versioned source-transcript storage and a daily app-level safety budget capped at 8,000 estimated Whisper Neurons
-- Workspace watermark settings API and 9:16 preview controls
+- Responsive dashboard shell with Sources, Clip Discovery, Review Center, Content Library, Publisher and Settings views.
+- Workspace authentication and account-scoped source, clip, render, review and publishing APIs.
+- Private R2 source uploads and byte-range video preview.
+- Scheduled source transcription and AI clip discovery through the separate analysis Worker.
+- Clip editing with versioned metadata, timestamped subtitles, subtitle styling and saved Brand Profiles.
+- Browser-based 9:16 rendering with blurred background fill, watermark and WebM output. **This renderer still runs in the browser and pauses when the page is hidden; closing the tab does not provide background rendering.**
+- Render history, protected old-render cleanup, Content Library and a version-bound Review Center approval flow.
+- YouTube OAuth, approved-render selection, publishing queue and analytics endpoints. Live end-to-end publishing still depends on the correct Cloudflare bindings and YouTube credentials.
+- Quality checks cover JavaScript syntax, ordered D1 migrations, frontend asset paths and cache-version consistency.
 
-The dashboard does not pretend that rendering or YouTube publishing is active before those services are configured. The transcription Worker is active on a one-minute cron schedule; it processes one 60-second audio chunk per invocation.
+The GitHub repository and Cloudflare Pages deployment are separate checks. A passing GitHub Actions run validates the source code only; it does not prove that the intended Pages project has deployed that commit.
 
 ## Cloudflare Pages setup
 
@@ -83,9 +72,11 @@ After binding D1 and applying migrations, deploy the Pages project and verify:
 - Authentication endpoints require the D1 binding.
 - Email verification, bot protection and account recovery are not yet implemented; do not treat this first auth foundation as a fully hardened public SaaS launch.
 
-## Not implemented yet
+## Remaining work
 
-in-editor clip trimming, subtitle styling and word-highlighting UI, actual watermark burn-in, video rendering, Review Center actions, YouTube OAuth, publishing queue workers and analytics. Transcription is active for MP4 (H.264/AAC) sources up to 10 minutes and 90 MB; other uploaded formats remain available for private storage and preview but are not supported by the current analysis Worker. Source upload, private video streaming preview and watermark configuration are implemented. End-to-end browser verification with a real uploaded video is still pending.
+- Background rendering that continues independently of the browser tab is **not implemented yet**. The current MediaRecorder/canvas renderer is browser-bound.
+- End-to-end browser verification with a real source upload, saved render, Review Center decision and YouTube upload is still pending.
+- Confirm the production Pages project, D1/R2 bindings, analysis Worker deployment and YouTube secrets before treating the service as production-ready.
 
 ## Analysis engine
 
