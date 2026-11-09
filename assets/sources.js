@@ -165,7 +165,7 @@
     progress("Transcription complete. Clip discovery is queued…",100);
   }
   async function queueSource(sourceId,button) {
-    button.disabled=true;button.textContent="Preparing…";
+    if(button){button.disabled=true;button.textContent="Preparing…";}
     const box=$("#upload-progress"),bar=$("#upload-progress-bar"),pct=$("#upload-percent"),status=$("#upload-status");
     box.classList.remove("hidden");$("#upload-filename").textContent="AI audio transcription";bar.style.width="0%";pct.textContent="0%";status.classList.remove("error-text");
     try {
@@ -176,11 +176,42 @@
       const duration=Number(source.durationSeconds||0);
       if(!Number.isFinite(duration)||duration<=0||duration>1800)throw new Error("Browser transcription supports MP4 videos up to 30 minutes.");
       await transcribeSourceInBrowser(sourceId,duration,(message,value)=>{status.textContent=message;bar.style.width=value+"%";pct.textContent=value+"%";});
-      button.textContent="Transcribed";await load();await loadJobs();
+      if(button)button.textContent="Transcribed";await load();await loadJobs();
     } catch(error) {
       status.textContent=error.message||"Transcription failed. Retry analysis.";
-      status.classList.add("error-text");button.disabled=false;button.textContent="Retry analysis";
+      status.classList.add("error-text");if(button){button.disabled=false;button.textContent="Retry analysis";}throw error;
     }
+  }
+  async function waitForDiscoveredClip(sourceId,progress){
+    const deadline=Date.now()+20*60*1000;
+    while(Date.now()<deadline){
+      const response=await fetch("/api/clips",{headers:{accept:"application/json"},cache:"no-store"});
+      const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not check discovered clips.");
+      const clips=(data.clips||[]).filter(item=>String(item.sourceId)===String(sourceId));
+      if(clips.length)return clips.sort((a,b)=>Number(b.score||0)-Number(a.score||0))[0];
+      progress("AI is finding the strongest moments…",92);
+      await new Promise(resolve=>setTimeout(resolve,10000));
+    }
+    throw new Error("AI discovery is taking longer than expected. Your upload and transcript are saved; refresh Clip Discovery later.");
+  }
+  async function runAutopilot(sourceId){
+    const bar=$("#upload-progress-bar"),pct=$("#upload-percent"),status=$("#upload-status");
+    const progress=(message,value)=>{status.textContent=message;bar.style.width=value+"%";pct.textContent=value+"%";};
+    try{
+      progress("Step 1/4 · Transcribing your source automatically…",2);
+      await queueSource(sourceId,null);
+      progress("Step 2/4 · Waiting for AI clip discovery…",90);
+      const clip=await waitForDiscoveredClip(sourceId,progress);
+      if(!window.__shortsflowOpenClipPreview||!window.__shortsflowRenderActiveClip)throw new Error("Automatic render tools are still loading. Your clip candidate is saved; refresh and retry.");
+      progress("Step 3/4 · Preparing the highest-scoring clip…",94);
+      await window.__shortsflowOpenClipPreview(clip);
+      progress("Step 4/4 · Rendering the finished Short…",96);
+      const rendered=await window.__shortsflowRenderActiveClip();
+      if(!rendered)throw new Error("The clip was discovered, but automatic rendering did not finish. Open the candidate in Clip Discovery to retry.");
+      progress("Done · Your finished Short is ready in Review Center. Approve it when you're happy.",100);
+      await load();await loadJobs();
+      document.dispatchEvent(new CustomEvent("shortsflow:autopilot-complete",{detail:{sourceId,clipId:clip.id}}));
+    }catch(error){status.textContent="Autopilot paused: "+(error.message||"Processing failed.")+" Your uploaded source is safe.";status.classList.add("error-text");}
   }
   async function upload(file) {
     if(!allowed.has(file.type)){alert("Unsupported format. Use MP4, MOV, WebM, MKV or OGG.");return;}
@@ -221,9 +252,10 @@
       });
       const complete=await completeResponse.json();
       if(!completeResponse.ok||!complete.ok)throw new Error(complete.error||"Could not finalize upload.");
-      bar.style.width="100%";pct.textContent="100%";status.textContent="Saved to private storage.";
+      bar.style.width="100%";pct.textContent="100%";status.textContent="Saved to private storage. Starting Autopilot…";
       await load();
       fetch("/api/workspace/summary").then(r=>r.json()).then(d=>{if(d.ok&&d.stats)$("#stat-sources").textContent=d.stats.sources;}).catch(()=>{});
+      if(complete.source?.id)runAutopilot(complete.source.id);
     } catch(error){
       status.textContent=error.message||"Upload failed. Retry the upload.";
       status.classList.add("error-text");
