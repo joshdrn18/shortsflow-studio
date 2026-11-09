@@ -21,7 +21,7 @@ AI-assisted short-form video production workspace.
 - Cloudflare R2 for private source media storage (source upload integration implemented)
 - YouTube Data API for authorized publishing (integration pending)
 
-Heavy video processing will not run inside request-bound Pages Functions. A separate rendering runtime and durable job orchestration will be selected before implementing that pipeline.
+Heavy video processing runs on a GitHub-hosted FFmpeg runner. Pages Functions enqueue jobs in D1; the runner authenticates with GitHub OIDC to the analysis Worker, streams source media from private R2, and writes completed MP4 renders back to R2. GitHub Actions checks the queue every five minutes and can also be started manually.
 
 ## Current implementation
 
@@ -30,7 +30,7 @@ Heavy video processing will not run inside request-bound Pages Functions. A sepa
 - Private R2 source uploads and byte-range video preview.
 - Scheduled source transcription and AI clip discovery through the separate analysis Worker.
 - Clip editing with versioned metadata, timestamped subtitles, subtitle styling and saved Brand Profiles.
-- Browser-based 9:16 rendering with blurred background fill, watermark and WebM output. **This renderer still runs in the browser and pauses when the page is hidden; closing the tab does not provide background rendering.**
+- Persistent background 9:16 FFmpeg rendering on a GitHub-hosted runner, with blurred background fill, centered source video, word-timed subtitles, watermark and MP4 output. Jobs are stored in D1 and outputs in private R2; rendering continues independently of the browser tab.
 - Render history, protected old-render cleanup, Content Library and a version-bound Review Center approval flow.
 - YouTube OAuth, approved-render selection, publishing queue and analytics endpoints. Live end-to-end publishing still depends on the correct Cloudflare bindings and YouTube credentials.
 - Quality checks cover JavaScript syntax, ordered D1 migrations, frontend asset paths and cache-version consistency.
@@ -74,9 +74,16 @@ After binding D1 and applying migrations, deploy the Pages project and verify:
 
 ## Remaining work
 
-- Background rendering that continues independently of the browser tab is **not implemented yet**. The current MediaRecorder/canvas renderer is browser-bound.
+- Verify the background render pipeline end-to-end with a real source, including the GitHub Actions OIDC claim, FFmpeg output, R2 asset registration and Review Center preview.
 - End-to-end browser verification with a real source upload, saved render, Review Center decision and YouTube upload is still pending.
 - Confirm the production Pages project, D1/R2 bindings, analysis Worker deployment and YouTube secrets before treating the service as production-ready.
+
+## Background rendering
+
+- Apply migration `0020_background_render_jobs.sql` to the production D1 database.
+- The GitHub Actions workflow `.github/workflows/background-render.yml` needs `id-token: write`; it runs every five minutes and uses OIDC with audience `shortsflow-render`.
+- The analysis Worker validates the GitHub OIDC signature and restricts access to this repository, the `main` branch and the background-render workflow. No long-lived GitHub token or R2 credential is stored in GitHub.
+- The runner requires FFmpeg and DejaVu fonts, downloads source media through the authenticated Worker, and uploads the MP4 result through the same Worker.
 
 ## Analysis engine
 
