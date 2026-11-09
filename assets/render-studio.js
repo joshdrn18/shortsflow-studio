@@ -153,82 +153,52 @@
   history.dataset.clipId=clipId;
  }
  async function render(){
-  if(busy)return false;window.__shortsflowRenderSucceeded=false;const clip=window.__shortsflowActiveClip;let v=$("#clip-preview-video"),renderObjectUrl=null;const btn=$("#clip-render-btn"),msg=$("#clip-render-message");if(!clip?.id||!v||!btn)return;ensureCleanupButton(msg,clip.id);
-  if(!window.MediaRecorder||!v.captureStream||!HTMLCanvasElement.prototype.captureStream){msg.textContent="Browser rendering requires the latest Chrome or Edge.";return;}
-  const current=window.__shortsflowActiveClip;
+  if(busy)return false;
+  window.__shortsflowRenderSucceeded=false;
+  const clip=window.__shortsflowActiveClip,btn=$("#clip-render-btn"),msg=$("#clip-render-message");
+  if(!clip?.id||!btn||!msg)return false;
+  ensureCleanupButton(msg,clip.id);
   const changedCut=Math.abs(Number(window.__shortsflowClipStart)-Number(clip.startSeconds))>.05||Math.abs(Number(window.__shortsflowClipEnd)-Number(clip.endSeconds))>.05;
   const changedMeta=$("#clip-edit-title")?.value.trim()!==(clip.title||"")||$("#clip-edit-caption")?.value.trim()!==(clip.caption||"")||$("#clip-edit-hashtags")?.value.trim()!==(clip.hashtags||"")||$("#clip-edit-language")?.value.trim()!==(clip.language||"");
-  if(changedCut||changedMeta||window.__shortsflowSubtitleDirty||window.__shortsflowWatermarkDirty){msg.textContent="Save your clip edits, subtitle style and watermark settings first, then render again.";return;}
-  busy=true;btn.disabled=true;btn.textContent="Preparing…";let recorder=null,canvasStream=null,sourceStream=null,frame=0,stopped=false,xhr=null,renderWatchdog=null,stallTimer=null,onWaiting=null,onPlaying=null,onVisibilityChange=null,localVideoElement=null;const originalPlaybackRate=v.playbackRate;
-  const cancelBtn=document.createElement("button");cancelBtn.type="button";cancelBtn.id="clip-render-cancel";cancelBtn.className=btn.className;cancelBtn.textContent="Cancel render";cancelBtn.style.marginLeft="8px";btn.insertAdjacentElement("afterend",cancelBtn);
-  const task={cancelled:false,cancel(){if(this.cancelled)return;this.cancelled=true;stopped=true;cancelAnimationFrame(frame);try{if(v&&!v.paused)v.pause();}catch{}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(xhr&&xhr.readyState!==XMLHttpRequest.DONE)xhr.abort();msg.textContent="Render cancelled. No new render was saved.";}};activeCancel=task;cancelBtn.addEventListener("click",()=>task.cancel());
-  try{
-   msg.textContent="Loading saved cut, subtitles and watermark…";
-   const [sub,settings]=await Promise.all([getJson("/api/clips/"+encodeURIComponent(clip.id)+"/subtitles"),getJson("/api/workspace/settings")]);
-   if(task.cancelled)return;
-   const c=sub.clip,start=Number(c.startSeconds),end=Number(c.endSeconds),duration=end-start,mv=Number(c.metadataVersion);
-   if(!mv||duration<1||duration>180)throw new Error("Save the clip cut and subtitle style first. Clip duration must be 1–180 seconds.");
-   if(v.currentSrc&&!v.currentSrc.includes(encodeURIComponent(c.sourceId)))throw new Error("This preview is not showing the selected clip source. Close and reopen it.");
-   msg.textContent="Preparing a local copy of the source video…";
-   const sourceResponse=await fetch("/api/sources/"+encodeURIComponent(c.sourceId),{cache:"no-store",credentials:"same-origin"});
-   if(!sourceResponse.ok)throw new Error("Could not download the private source video ("+sourceResponse.status+"). Reopen the preview and retry.");
-   const declaredSize=Number(sourceResponse.headers.get("Content-Length")||0);
-   if(declaredSize>200*1024*1024)throw new Error("Source exceeds the 200 MB browser-render limit.");
-   const sourceBlob=await sourceResponse.blob();
-   if(!sourceBlob.size||sourceBlob.size>200*1024*1024)throw new Error("The downloaded source is empty or exceeds the 200 MB browser-render limit.");
-   renderObjectUrl=URL.createObjectURL(sourceBlob);
-   const localVideo=document.createElement("video");localVideoElement=localVideo;localVideo.preload="auto";localVideo.playsInline=true;localVideo.muted=true;localVideo.autoplay=true;localVideo.style.cssText="position:fixed;left:-10px;top:-10px;width:2px;height:2px;opacity:0.001;pointer-events:none;z-index:-1";document.body.appendChild(localVideo);localVideo.src=renderObjectUrl;
-   await new Promise((resolve,reject)=>{let settled=false;const finish=error=>{if(settled)return;settled=true;clearTimeout(timer);localVideo.removeEventListener("loadeddata",ready);localVideo.removeEventListener("error",failed);error?reject(error):resolve();};const ready=()=>{if(localVideo.videoWidth>0&&localVideo.readyState>=2)finish();};const failed=()=>finish(new Error("The local source copy could not be decoded by this browser. Try an MP4 encoded with H.264 video and AAC audio."));const timer=setTimeout(()=>finish(new Error("The local source copy took too long to prepare. Check available memory and retry.")),90000);localVideo.addEventListener("loadeddata",ready);localVideo.addEventListener("error",failed);localVideo.load();});
-   v=localVideo;
-   const canvas=document.createElement("canvas");canvas.width=1080;canvas.height=1920;const ctx=canvas.getContext("2d",{alpha:false});
-   canvasStream=canvas.captureStream(30);sourceStream=v.captureStream();const tracks=[...canvasStream.getVideoTracks(),...sourceStream.getAudioTracks()];if(!tracks.length)throw new Error("Could not capture video/audio tracks.");
-   const stream=new MediaStream(tracks),types=["video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"],mime=types.find(x=>MediaRecorder.isTypeSupported(x));if(!mime)throw new Error("No supported WebM encoder found in this browser.");
-   const chunks=[];recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:4500000,audioBitsPerSecond:128000});
-   const done=new Promise((resolve,reject)=>{recorder.addEventListener("stop",resolve,{once:true});recorder.addEventListener("error",()=>reject(new Error("Browser video encoder failed.")),{once:true});});
-   recorder.addEventListener("dataavailable",e=>{if(e.data?.size)chunks.push(e.data);});
-   v.pause();v.defaultPlaybackRate=1;v.playbackRate=1;await seek(v,start);if(task.cancelled)return;const started=performance.now();let last=0;
-   let frameError=null;
-   const stop=()=>{if(stopped)return;stopped=true;cancelAnimationFrame(frame);try{v.pause();}catch{}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}};
-   const draw=()=>{frame=0;if(stopped||document.visibilityState==="hidden")return;try{const videoBox=drawVerticalComposition(ctx,v,1080,1920);const t=v.currentTime-start;drawWords(ctx,sub.words||[],t,sub.config||{},1080,1920,videoBox);drawMark(ctx,settings.settings||{},1080,1920);if(performance.now()-last>350){msg.textContent="Rendering in this browser… "+Math.round(Math.min(99,Math.max(0,t/duration*100)))+"%";last=performance.now();}if(v.currentTime>=end||v.ended){stop();return;}frame=requestAnimationFrame(draw);}catch(error){frameError=error instanceof Error?error:new Error(String(error));stop();}};
-   let lastProgressAt=performance.now(),lastVideoTime=v.currentTime,recoveryCount=0,buffering=false,backgroundPaused=false,watchdogReject=null;
-    const armWatchdog=()=>{if(renderWatchdog)clearTimeout(renderWatchdog);renderWatchdog=null;if(document.visibilityState==="hidden")return;renderWatchdog=setTimeout(()=>watchdogReject?.(new Error("Render timed out while the tab was active. The render was stopped safely; retry when the preview is ready.")),Math.max(240000,duration*3+120000));};
-    onVisibilityChange=()=>{if(stopped||task.cancelled)return;if(document.visibilityState==="hidden"){if(backgroundPaused)return;backgroundPaused=true;if(renderWatchdog){clearTimeout(renderWatchdog);renderWatchdog=null;}if(recorder&&recorder.state==="recording"){try{recorder.pause();}catch{}}try{v.pause();}catch{}msg.textContent="Render safely paused because ShortsFlow is in another tab. Return to this tab to continue.";return;}if(!backgroundPaused)return;backgroundPaused=false;lastVideoTime=v.currentTime;lastProgressAt=performance.now();armWatchdog();msg.textContent="Back in ShortsFlow · resuming your render…";v.play().catch(error=>{frameError=error instanceof Error?error:new Error(String(error));stop();});};
-    const progressCheck=()=>{if(stopped||task.cancelled||backgroundPaused||document.visibilityState==="hidden")return;const now=performance.now(),current=v.currentTime;if(current>lastVideoTime+.08){lastVideoTime=current;lastProgressAt=now;recoveryCount=0;return;}if(now-lastProgressAt<12000)return;if(recoveryCount>=20){if(stallTimer)clearInterval(stallTimer);return;}recoveryCount++;lastProgressAt=now;msg.textContent="Source is buffering · waiting for video data ("+recoveryCount+"/20)…";if(v.readyState>=3&&!buffering){v.play().catch(()=>{});}else if(v.readyState<3){const onReady=()=>{v.removeEventListener("canplay",onReady);if(!stopped&&!task.cancelled&&!v.paused)v.play().catch(()=>{});};v.addEventListener("canplay",onReady,{once:true});}};
-    onWaiting=()=>{if(stopped||task.cancelled)return;buffering=true;msg.textContent="Source buffering · render safely paused while video data loads…";if(recorder&&recorder.state==="recording"){try{recorder.pause();}catch{}}};
-    onPlaying=()=>{if(stopped||task.cancelled)return;buffering=false;lastVideoTime=v.currentTime;lastProgressAt=performance.now();if(recorder&&recorder.state==="paused"){try{recorder.resume();}catch{}}if(!frame&&document.visibilityState!=="hidden")frame=requestAnimationFrame(draw);if(!backgroundPaused)msg.textContent="Source recovered · rendering is continuing…";};
-    v.preload="auto";
-    v.addEventListener("waiting",onWaiting);v.addEventListener("stalled",onWaiting);v.addEventListener("playing",onPlaying);document.addEventListener("visibilitychange",onVisibilityChange);
-    stallTimer=setInterval(progressCheck,3000);
-    const watchdogPromise=new Promise((_,reject)=>{watchdogReject=reject;});armWatchdog();
-    recorder.start(1000);await v.play();v.muted=false;if(!frame)frame=requestAnimationFrame(draw);await Promise.race([done,watchdogPromise]);if(frameError)throw new Error("Render frame failed: "+frameError.message);if(renderWatchdog){clearTimeout(renderWatchdog);renderWatchdog=null;}if(stallTimer)clearInterval(stallTimer);v.removeEventListener("waiting",onWaiting);v.removeEventListener("stalled",onWaiting);if(task.cancelled)return;
-   if(performance.now()-started<500)throw new Error("The source did not play long enough. Retry.");
-   const blob=new Blob(chunks,{type:"video/webm"});if(blob.size<1024)throw new Error("Render output is empty. Check source playback and retry.");if(blob.size>90*1024*1024)throw new Error("Render exceeds the 90 MB limit. Try a shorter clip.");
-   if(task.cancelled)return;
-   msg.textContent="Uploading render to private R2 storage…";
-   const result=await new Promise((resolve,reject)=>{
-    xhr=new XMLHttpRequest();xhr.open("POST","/api/clips/"+encodeURIComponent(clip.id)+"/render");xhr.withCredentials=true;xhr.timeout=300000;
-    xhr.setRequestHeader("Content-Type","video/webm");xhr.setRequestHeader("X-Metadata-Version",String(mv));
-    xhr.upload.addEventListener("progress",event=>{
-     if(event.lengthComputable){const percent=Math.round(event.loaded/event.total*100),sent=(event.loaded/1048576).toFixed(1),total=(event.total/1048576).toFixed(1);msg.textContent=percent>=100?"Upload complete. Verifying the video in private R2 storage…":"Uploading to private R2 storage… "+percent+"% · "+sent+" / "+total+" MB";}
-     else msg.textContent="Uploading render to private R2 storage…";
-    });
-    xhr.addEventListener("load",()=>{
-     let data={};try{data=JSON.parse(xhr.responseText||"{}");}catch{}
-     if(xhr.status<200||xhr.status>=300||!data.ok){reject(new Error(data.error||"R2 upload failed (HTTP "+xhr.status+")."));return;}
-     resolve(data);
-    });
-    xhr.addEventListener("error",()=>reject(new Error("Network error while uploading to R2. Check connection and retry.")));
-    xhr.addEventListener("timeout",()=>reject(new Error("R2 upload timed out after 5 minutes. The server did not confirm a saved asset; refresh the clip before retrying.")));
-    xhr.addEventListener("abort",()=>reject(new Error("R2 upload was cancelled.")));
-    xhr.send(blob);msg.textContent="Connecting to private R2 storage…";
-   });
-   if(task.cancelled)return;
-   msg.replaceChildren();
-   msg.append(document.createTextNode("Render saved · WebM · "+(result.asset.sizeBytes/1048576).toFixed(1)+" MB · "));
-   const link=document.createElement("a");link.href=result.asset.url;link.target="_blank";link.rel="noopener";link.textContent="Open rendered video ↗";msg.append(link);
+  if(changedCut||changedMeta||window.__shortsflowSubtitleDirty||window.__shortsflowWatermarkDirty){msg.textContent="Save your clip edits, subtitle style and watermark settings first, then queue the background render.";return false;}
+  busy=true;btn.disabled=true;btn.textContent="Queueing…";
+  const statusUrl="/api/clips/"+encodeURIComponent(clip.id)+"/render-jobs";
+  const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const showAsset=asset=>{
+   msg.replaceChildren();msg.append(document.createTextNode("Background render saved · MP4 · "+(Number(asset.sizeBytes||0)/1048576).toFixed(1)+" MB · "));
+   const link=document.createElement("a");link.href=asset.url||("/api/clips/"+encodeURIComponent(clip.id)+"/render");link.target="_blank";link.rel="noopener";link.textContent="Open rendered video ↗";msg.append(link);
    btn.textContent="Render again";window.__shortsflowRenderSucceeded=true;
-  }catch(e){if(!task.cancelled){msg.textContent=e.message||"Render failed. Retry.";btn.textContent="Retry render";}window.__shortsflowRenderSucceeded=false;}
-  finally{if(renderWatchdog)clearTimeout(renderWatchdog);if(typeof stallTimer!=="undefined"&&stallTimer)clearInterval(stallTimer);if(typeof onWaiting==="function"){v.removeEventListener("waiting",onWaiting);v.removeEventListener("stalled",onWaiting);}if(typeof onPlaying==="function")v.removeEventListener("playing",onPlaying);document.removeEventListener("visibilitychange",onVisibilityChange);stopped=true;cancelAnimationFrame(frame);try{v.playbackRate=originalPlaybackRate||1;}catch{}if(xhr&&xhr.readyState!==XMLHttpRequest.DONE){try{xhr.abort();}catch{}}if(recorder&&recorder.state!=="inactive"){try{recorder.stop();}catch{}}if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(sourceStream)sourceStream.getTracks().forEach(t=>t.stop());if(localVideoElement){try{localVideoElement.pause();localVideoElement.removeAttribute("src");localVideoElement.load();localVideoElement.remove();}catch{}}if(renderObjectUrl)URL.revokeObjectURL(renderObjectUrl);cancelBtn.remove();if(activeCancel===task)activeCancel=null;busy=false;btn.disabled=false;}
+  };
+  try{
+   let response=await fetch(statusUrl,{headers:{accept:"application/json"},cache:"no-store"});
+   let data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not check background render status.");
+   let job=data.job;
+   if(job&&Number(job.metadataVersion)===Number(clip.metadataVersion)&&job.status==="completed"&&job.asset){showAsset(job.asset);return true;}
+   if(!job||Number(job.metadataVersion)!==Number(clip.metadataVersion)||!["queued","running"].includes(job.status)){
+    msg.textContent="Adding render to the background queue…";
+    response=await fetch(statusUrl,{method:"POST",headers:{accept:"application/json"}});
+    data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not queue background render.");
+    job=data.job;
+   }
+   msg.textContent="Background render queued. You can switch tabs or close this browser; processing continues on the server.";
+   const deadline=Date.now()+45*60*1000;
+   while(Date.now()<deadline){
+    await wait(5000);
+    response=await fetch(statusUrl,{headers:{accept:"application/json"},cache:"no-store"});
+    data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not refresh background render status.");
+    job=data.job;
+    if(job&&job.status==="completed"&&job.asset){showAsset(job.asset);return true;}
+    if(job&&job.status==="failed")throw new Error(job.error||"Background rendering failed. You can retry safely.");
+    if(job&&Number(job.metadataVersion)!==Number(clip.metadataVersion))throw new Error("Clip settings changed while rendering. Save the latest edits and queue a new render.");
+    if(job?.status==="queued")msg.textContent="Waiting for the background FFmpeg runner… You can close this tab safely.";
+    else if(job?.status==="running")msg.textContent="Rendering on the background server… This continues even when ShortsFlow is closed.";
+   }
+   msg.textContent="Render is still running in the background. You can close this tab and reopen the clip later to check the result.";
+   btn.textContent="Check render status";return false;
+  }catch(error){
+   msg.textContent=error.message||"Background render failed. Retry.";
+   btn.textContent="Retry background render";window.__shortsflowRenderSucceeded=false;return false;
+  }finally{busy=false;btn.disabled=false;}
  }
  window.__shortsflowRenderActiveClip=async()=>{await render();return window.__shortsflowRenderSucceeded===true;};
  document.addEventListener("click",e=>{if(e.target.closest("#clip-render-btn"))render();});
