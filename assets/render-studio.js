@@ -178,7 +178,7 @@
    const sourceBlob=await sourceResponse.blob();
    if(!sourceBlob.size||sourceBlob.size>200*1024*1024)throw new Error("The downloaded source is empty or exceeds the 200 MB browser-render limit.");
    renderObjectUrl=URL.createObjectURL(sourceBlob);
-   const localVideo=document.createElement("video");localVideo.preload="auto";localVideo.playsInline=true;localVideo.muted=false;localVideo.src=renderObjectUrl;
+   const localVideo=document.createElement("video");localVideo.preload="auto";localVideo.playsInline=true;localVideo.muted=true;localVideo.src=renderObjectUrl;
    await new Promise((resolve,reject)=>{let settled=false;const finish=error=>{if(settled)return;settled=true;clearTimeout(timer);localVideo.removeEventListener("loadeddata",ready);localVideo.removeEventListener("error",failed);error?reject(error):resolve();};const ready=()=>{if(localVideo.videoWidth>0&&localVideo.readyState>=2)finish();};const failed=()=>finish(new Error("The local source copy could not be decoded by this browser. Try an MP4 encoded with H.264 video and AAC audio."));const timer=setTimeout(()=>finish(new Error("The local source copy took too long to prepare. Check available memory and retry.")),90000);localVideo.addEventListener("loadeddata",ready);localVideo.addEventListener("error",failed);localVideo.load();});
    v=localVideo;
    const canvas=document.createElement("canvas");canvas.width=1080;canvas.height=1920;const ctx=canvas.getContext("2d",{alpha:false});
@@ -197,7 +197,7 @@
     v.preload="auto";
     v.addEventListener("waiting",onWaiting);v.addEventListener("stalled",onWaiting);v.addEventListener("playing",onPlaying);
     stallTimer=setInterval(progressCheck,3000);
-    recorder.start(1000);await v.play();frame=requestAnimationFrame(draw);await Promise.race([done,new Promise((_,reject)=>{renderWatchdog=setTimeout(()=>reject(new Error("The source stayed unavailable for too long. No render was saved. Check your connection and reopen the clip preview before retrying.")),Math.max(240000,duration*3+120000));})]);if(renderWatchdog){clearTimeout(renderWatchdog);renderWatchdog=null;}if(stallTimer)clearInterval(stallTimer);v.removeEventListener("waiting",onWaiting);v.removeEventListener("stalled",onWaiting);if(task.cancelled)return;
+    recorder.start(1000);await v.play();v.muted=false;frame=requestAnimationFrame(draw);await Promise.race([done,new Promise((_,reject)=>{renderWatchdog=setTimeout(()=>reject(new Error("The source stayed unavailable for too long. No render was saved. Check your connection and reopen the clip preview before retrying.")),Math.max(240000,duration*3+120000));})]);if(renderWatchdog){clearTimeout(renderWatchdog);renderWatchdog=null;}if(stallTimer)clearInterval(stallTimer);v.removeEventListener("waiting",onWaiting);v.removeEventListener("stalled",onWaiting);if(task.cancelled)return;
    if(performance.now()-started<500)throw new Error("The source did not play long enough. Retry.");
    const blob=new Blob(chunks,{type:"video/webm"});if(blob.size<1024)throw new Error("Render output is empty. Check source playback and retry.");if(blob.size>90*1024*1024)throw new Error("Render exceeds the 90 MB limit. Try a shorter clip.");
    if(task.cancelled)return;
