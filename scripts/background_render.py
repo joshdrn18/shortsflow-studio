@@ -87,11 +87,11 @@ def make_ass(job, path):
         groups.append(group)
     font_scale = max(.82, min(1.65, float(cfg.get("fontSize", 28)) / 28))
     size = max(30, min(76, round(49 * font_scale)))
+    background = int(cfg.get("background", True) is not False)
     border_style = 3 if background else 1
     back_colour = "AA000000" if background else "00000000"
     base = ass_color(cfg.get("color", "#ffffff"))
     highlight = ass_color(cfg.get("highlight", "#b59aff"))
-    background = int(cfg.get("background", True) is not False)
     position = cfg.get("position", "bottom")
     frame_y, frame_h = 173, 1574
     edge = max(.05, min(.25, float(cfg.get("edgeOffset", 9)) / 100))
