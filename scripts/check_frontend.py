@@ -4,7 +4,7 @@ import json
 import shlex
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = "20261109-audit-3"
+BUILD = "20261109-audit-4"
 
 class Assets(HTMLParser):
     def __init__(self):
@@ -47,4 +47,6 @@ if omitted:
     raise SystemExit(f"JavaScript files not covered by syntax checks: {omitted}")
 if f"UI build {BUILD}" not in html:
     raise SystemExit("Visible UI build marker is missing.")
+compile((ROOT / "scripts/background_render.py").read_text(encoding="utf-8"), "scripts/background_render.py", "exec")
+print("OK: background FFmpeg runner Python syntax is valid.")
 print(f"OK: {len(parser.paths)} linked assets exist; cache versions match {BUILD}; all {len(actual)} JavaScript files are syntax-checked.")
