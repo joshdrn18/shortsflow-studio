@@ -162,6 +162,9 @@
   const changedMeta=$("#clip-edit-title")?.value.trim()!==(clip.title||"")||$("#clip-edit-caption")?.value.trim()!==(clip.caption||"")||$("#clip-edit-hashtags")?.value.trim()!==(clip.hashtags||"")||$("#clip-edit-language")?.value.trim()!==(clip.language||"");
   if(changedCut||changedMeta||window.__shortsflowSubtitleDirty||window.__shortsflowWatermarkDirty){msg.textContent="Save your clip edits, subtitle style and watermark settings first, then queue the background render.";return false;}
   busy=true;btn.disabled=true;btn.textContent="Queueing…";
+  const subtitleData=await getJson("/api/clips/"+encodeURIComponent(clip.id)+"/subtitles");
+  const metadataVersion=Number(subtitleData.clip?.metadataVersion);
+  if(!Number.isSafeInteger(metadataVersion)||metadataVersion<1)throw new Error("Could not verify the latest clip settings before rendering.");
   const statusUrl="/api/clips/"+encodeURIComponent(clip.id)+"/render-jobs";
   const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const showAsset=asset=>{
@@ -173,8 +176,8 @@
    let response=await fetch(statusUrl,{headers:{accept:"application/json"},cache:"no-store"});
    let data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not check background render status.");
    let job=data.job;
-   if(job&&Number(job.metadataVersion)===Number(clip.metadataVersion)&&job.status==="completed"&&job.asset){showAsset(job.asset);return true;}
-   if(!job||Number(job.metadataVersion)!==Number(clip.metadataVersion)||!["queued","running"].includes(job.status)){
+   if(job&&Number(job.metadataVersion)===metadataVersion&&job.status==="completed"&&job.asset){showAsset(job.asset);return true;}
+   if(!job||Number(job.metadataVersion)!==metadataVersion||!["queued","running"].includes(job.status)){
     msg.textContent="Adding render to the background queue…";
     response=await fetch(statusUrl,{method:"POST",headers:{accept:"application/json"}});
     data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not queue background render.");
