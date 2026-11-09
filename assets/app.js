@@ -4,6 +4,9 @@ const escapeHTML = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => 
 }[char]));
 const activityLabels = {
   "source.uploaded": "Source video uploaded",
+  "source.transcribed": "Source transcription completed",
+  "source.clips_discovered": "AI clip discovery completed",
+  "subtitle_settings_saved": "Subtitle settings saved",
   "job.queued": "AI analysis queued",
   "job.cancelled": "Analysis cancelled",
   "job.retried": "Analysis retried",
