@@ -11,7 +11,7 @@ export async function onRequestGet({ request, env }) {
       `SELECT c.id, c.source_video_id, s.title AS source_title, COALESCE(m.title, c.title) AS title,
               c.start_seconds, c.end_seconds, s.duration_seconds AS source_duration,
               c.hook, c.ai_score, c.transcript, c.status, c.created_at,
-              m.caption, m.hashtags, m.language, m.version AS metadata_version
+              m.caption, m.hashtags, m.language, m.version AS metadata_version, m.created_at AS metadata_updated_at
        FROM clips c
        JOIN source_videos s ON s.id = c.source_video_id AND s.workspace_id = c.workspace_id
        LEFT JOIN clip_metadata m ON m.clip_id = c.id
@@ -30,7 +30,7 @@ export async function onRequestGet({ request, env }) {
         durationSeconds: Math.max(0, Number(row.end_seconds) - Number(row.start_seconds)),
         hook: row.hook, score: row.ai_score, transcript: row.transcript,
         caption: row.caption, hashtags: row.hashtags, language: row.language,
-        metadataVersion: row.metadata_version || 0, status: row.status, createdAt: row.created_at
+        metadataVersion: row.metadata_version || 0, status: row.status, createdAt: row.created_at, lastEditedAt: row.metadata_version > 1 ? row.metadata_updated_at : null
       }))
     });
   } catch {
