@@ -158,28 +158,40 @@
   const clip=window.__shortsflowActiveClip,btn=$("#clip-render-btn"),msg=$("#clip-render-message");
   if(!clip?.id||!btn||!msg)return false;
   ensureCleanupButton(msg,clip.id);
-  const changedCut=Math.abs(Number(window.__shortsflowClipStart)-Number(clip.startSeconds))>.05||Math.abs(Number(window.__shortsflowClipEnd)-Number(clip.endSeconds))>.05;
-  const changedMeta=$("#clip-edit-title")?.value.trim()!==(clip.title||"")||$("#clip-edit-caption")?.value.trim()!==(clip.caption||"")||$("#clip-edit-hashtags")?.value.trim()!==(clip.hashtags||"")||$("#clip-edit-language")?.value.trim()!==(clip.language||"");
-  if(changedCut||changedMeta||window.__shortsflowSubtitleDirty||window.__shortsflowWatermarkDirty){msg.textContent="Save your clip edits, subtitle style and watermark settings first, then queue the background render.";return false;}
+  const changedCut=()=>Math.abs(Number(window.__shortsflowClipStart)-Number(clip.startSeconds))>.05||Math.abs(Number(window.__shortsflowClipEnd)-Number(clip.endSeconds))>.05;
+  const changedMeta=()=>$("#clip-edit-title")?.value.trim()!==(clip.title||"")||$("#clip-edit-caption")?.value.trim()!==(clip.caption||"")||$("#clip-edit-hashtags")?.value.trim()!==(clip.hashtags||"")||$("#clip-edit-language")?.value.trim()!==(clip.language||"");
+  if(changedCut()||changedMeta()||window.__shortsflowSubtitleDirty||window.__shortsflowWatermarkDirty){msg.textContent="Save your latest clip edits, subtitle style and watermark settings first, then render.";return false;}
   busy=true;btn.disabled=true;btn.textContent="Queueing…";
-  let metadataVersion=0;
+  let metadataVersion=Number(clip.metadataVersion||0),requeues=0;
   const statusUrl="/api/clips/"+encodeURIComponent(clip.id)+"/render-jobs";
   const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const refreshVersion=async()=>{
+   const response=await fetch("/api/clips",{headers:{accept:"application/json"},cache:"no-store"});
+   const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not refresh the saved clip version.");
+   const latest=(data.clips||[]).find(item=>String(item.id)===String(clip.id));
+   if(!latest)throw new Error("This clip is no longer available.");
+   Object.assign(clip,latest);window.__shortsflowActiveClip=clip;
+   metadataVersion=Number(latest.metadataVersion||0);
+   return latest;
+  };
   const showAsset=asset=>{
    msg.replaceChildren();msg.append(document.createTextNode("Background render saved · MP4 · "+(Number(asset.sizeBytes||0)/1048576).toFixed(1)+" MB · "));
    const link=document.createElement("a");link.href=asset.url||("/api/clips/"+encodeURIComponent(clip.id)+"/render");link.target="_blank";link.rel="noopener";link.textContent="Open rendered video ↗";msg.append(link);
    btn.textContent="Render again";window.__shortsflowRenderSucceeded=true;
   };
+  const queueLatest=async()=>{
+   const response=await fetch(statusUrl,{method:"POST",headers:{accept:"application/json"}});
+   const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not queue the latest background render.");
+   return data.job;
+  };
   try{
+   await refreshVersion();
    let response=await fetch(statusUrl,{headers:{accept:"application/json"},cache:"no-store"});
    let data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not check background render status.");
    let job=data.job;
    if(job&&Number(job.metadataVersion)===metadataVersion&&job.status==="completed"&&job.asset){showAsset(job.asset);return true;}
    if(!job||Number(job.metadataVersion)!==metadataVersion||!["queued","running"].includes(job.status)){
-    msg.textContent="Adding render to the background queue…";
-    response=await fetch(statusUrl,{method:"POST",headers:{accept:"application/json"}});
-    data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not queue background render.");
-    job=data.job;
+    msg.textContent="Adding the latest saved edits to the background queue…";job=await queueLatest();
    }
    msg.textContent="Background render queued. You can switch tabs or close this browser; processing continues on the server.";
    const deadline=Date.now()+45*60*1000;
@@ -188,9 +200,18 @@
     response=await fetch(statusUrl,{headers:{accept:"application/json"},cache:"no-store"});
     data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not refresh background render status.");
     job=data.job;
-    if(job&&job.status==="completed"&&job.asset){showAsset(job.asset);return true;}
-    if(job&&job.status==="failed")throw new Error(job.error||"Background rendering failed. You can retry safely.");
-    if(job&&Number(job.metadataVersion)!==metadataVersion)throw new Error("Clip settings changed while rendering. Save the latest edits and queue a new render.");
+    if(job&&job.status==="completed"&&job.asset&&Number(job.metadataVersion)===metadataVersion){showAsset(job.asset);return true;}
+    if(job&&job.status==="failed"&&Number(job.metadataVersion)===metadataVersion)throw new Error(job.error||"Background rendering failed. You can retry safely.");
+    if(job&&Number(job.metadataVersion)!==metadataVersion){
+     await refreshVersion();
+     if(changedCut()||changedMeta()||window.__shortsflowSubtitleDirty||window.__shortsflowWatermarkDirty){
+      throw new Error("New edits are not saved yet. Save the latest edits, then render again.");
+     }
+     if(++requeues>3)throw new Error("Clip settings changed repeatedly. The latest edits are saved; please queue one more render.");
+     msg.textContent="Newer saved settings detected. Automatically queueing a fresh render…";
+     job=await queueLatest();
+     continue;
+    }
     if(job?.status==="queued")msg.textContent="Waiting for the background FFmpeg runner… You can close this tab safely.";
     else if(job?.status==="running")msg.textContent="Rendering on the background server… This continues even when ShortsFlow is closed.";
    }
