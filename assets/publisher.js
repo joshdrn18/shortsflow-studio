@@ -1,7 +1,7 @@
 (() => {
  const $=s=>document.querySelector(s),esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  let state={connection:null,jobs:[],eligible:[],loading:false,profiles:[],activeProfileId:null,metrics:null};
- const date=v=>{if(!v)return"Publish as soon as the uploader is available";const d=new Date(v);return Number.isNaN(d.getTime())?"—":d.toLocaleString([], {dateStyle:"medium",timeStyle:"short"});};
+ const date=v=>{if(!v)return"Ready for automatic upload";const d=new Date(v);return Number.isNaN(d.getTime())?"—":d.toLocaleString([], {dateStyle:"medium",timeStyle:"short"});};
  function ensure(){
   if($("#publisher-workspace"))return;
   const panel=document.createElement("section");panel.id="publisher-workspace";panel.className="publisher-workspace hidden";
@@ -18,7 +18,7 @@
      <section class="publisher-metadata-preview" aria-live="polite"><div class="publisher-preview-head"><div><span class="publisher-kicker">FINAL METADATA PREVIEW</span><b>Ready for YouTube</b></div><span class="publisher-preview-count" id="publisher-preview-count">0 / 100</span></div><div class="publisher-preview-body"><strong id="publisher-preview-title">Your video title will appear here</strong><p id="publisher-preview-description">Your description preview will appear here.</p><div id="publisher-preview-tags" class="publisher-preview-tags"><span>No tags added</span></div></div><small>Preview reflects the actual title, description and tags in the upload form. Review before queueing.</small></section>
      <div class="publisher-form-row"><label>Visibility<select id="publisher-privacy"><option value="private">Private</option><option value="unlisted">Unlisted</option><option value="public">Public</option></select></label><label>Schedule (optional)<input id="publisher-schedule" type="datetime-local"></label></div>
      <label>Tags <input id="publisher-tags" placeholder="shorts, topic, channel (comma separated)"></label>
-     <div class="publisher-form-foot"><p>New jobs are queued only. Actual upload processing is a separate step and will not start until the publishing worker is configured.</p><button class="primary-button" type="submit" id="publisher-submit" disabled>Queue upload <span>→</span></button></div>
+     <div class="publisher-form-foot"><p>After you queue an upload, Cloudflare checks the queue every minute and uploads it at its scheduled time. Only the latest approved render can be published. Default visibility is Private.</p><button class="primary-button" type="submit" id="publisher-submit" disabled>Queue upload <span>→</span></button></div>
      <p id="publisher-message" class="publisher-message" role="status"></p>
     </form>
    </section>
@@ -199,5 +199,6 @@
  }
  document.addEventListener("shortsflow:view",e=>{if(e.detail?.view==="publisher"){ensure();$("#publisher-workspace").classList.remove("hidden");load();}else $("#publisher-workspace")?.classList.add("hidden");});
  ensure();
+ setInterval(()=>{const panel=$("#publisher-workspace");if(panel&&!panel.classList.contains("hidden"))load();},15000);
  const params=new URLSearchParams(location.search);if(params.has("youtube")){const result=params.get("youtube"),reason=params.get("reason");history.replaceState({}, "", location.pathname);if(result==="connected")setTimeout(()=>{ensure();load();setMessage("YouTube channel connected successfully.");},0);else if(result!=="")setTimeout(()=>{ensure();const messages={denied:"Google connection was cancelled.",setup:"OAuth configuration is incomplete. Check the YouTube environment variables in Cloudflare Pages.", "invalid-state":"The Google sign-in session expired or did not match. Start Connect YouTube again.",token:"Google rejected the authorization-code exchange. Check the OAuth client ID, client secret, and exact redirect URI.", "channel-api":"Google sign-in succeeded, but YouTube Data API could not read the channel. Confirm YouTube Data API v3 is enabled in the same Google Cloud project.", "no-channel":"This Google account does not have an accessible YouTube channel. Create or select a YouTube channel, then reconnect.", "no-refresh-token":"Google did not provide a refresh token. Remove ShortsFlow access from your Google Account permissions, then connect again.", "encryption-key":"The token encryption key is invalid. Set YOUTUBE_TOKEN_ENCRYPTION_KEY to Base64 for exactly 32 random bytes in Pages.",database:"Google authorized the channel, but ShortsFlow could not save the connection in its database. Check the Pages D1 binding and migration 0012.",callback:"The OAuth callback failed unexpectedly. Check the Pages Function logs for youtube_oauth_callback."};setMessage(messages[reason]||"YouTube connection failed ("+(reason||"unknown")+"). Try connecting again.",true);},0);}
 })();
