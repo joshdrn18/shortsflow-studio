@@ -3,6 +3,10 @@ import { json, getSessionUser, readJson } from "../../_lib/auth.js";
 const ID = /^[0-9a-f-]{36}$/i;
 const DEFAULTS = { enabled: true, preset: "pop", fontSize: 28, color: "#ffffff", highlight: "#b59aff", position: "bottom", background: true };
 
+function cleanSubtitleWord(value) {
+  return String(value ?? "").replace(/<\\/?b\\s*>|&lt;\\/?b\\s*&gt;/gi, " ").replace(/(^|\\s)\\/b(?=\\s|$)/gi, " ").replace(/\\s+/g, " ").trim();
+}
+
 function cleanConfig(value) {
   const v = value && typeof value === "object" ? value : {};
   const presets = ["pop", "classic", "minimal"];
@@ -45,7 +49,7 @@ export async function onRequestGet({ request, env, params }) {
     if (!row) return json({ ok: false, error: "Clip not found." }, 404);
     let words = [];
     try { words = JSON.parse(row.segments_json || "[]"); } catch {}
-    words = (Array.isArray(words) ? words : []).filter(w => w && typeof w.word === "string" && Number.isFinite(Number(w.start)) && Number.isFinite(Number(w.end)) && Number(w.end) > Number(w.start) && Number(w.end) > Number(row.start_seconds) && Number(w.start) < Number(row.end_seconds)).slice(0, 10000).map(w => ({ word: w.word, start: Math.max(0, Number(w.start) - Number(row.start_seconds)), end: Math.max(0, Number(w.end) - Number(row.start_seconds)) }));
+    words = (Array.isArray(words) ? words : []).filter(w => w && typeof w.word === "string" && cleanSubtitleWord(w.word) && Number.isFinite(Number(w.start)) && Number.isFinite(Number(w.end)) && Number(w.end) > Number(w.start) && Number(w.end) > Number(row.start_seconds) && Number(w.start) < Number(row.end_seconds)).slice(0, 10000).map(w => ({ word: cleanSubtitleWord(w.word), start: Math.max(0, Number(w.start) - Number(row.start_seconds)), end: Math.max(0, Number(w.end) - Number(row.start_seconds)) }));
     let config = {};
     try { config = JSON.parse(row.subtitle_config_json || "{}"); } catch {}
     return json({ ok: true, clip: { id: row.id, sourceId: row.source_video_id, startSeconds: row.start_seconds, endSeconds: row.end_seconds, metadataVersion: row.version }, config: cleanConfig(config), words, language: row.language || null });
