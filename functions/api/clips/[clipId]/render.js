@@ -54,7 +54,7 @@ export async function onRequestPost({request,env,params}){
   stage="saving render record in D1";
   const now=new Date().toISOString();
   const saved = await env.DB.batch([
-   env.DB.prepare("INSERT INTO clip_assets (id,clip_id,asset_type,storage_key,mime_type,size_bytes,version,metadata_version,created_at) SELECT ?,?,'render',?,'video/webm',?,(SELECT COALESCE(MAX(version),0)+1 FROM clip_assets WHERE clip_id=? AND asset_type='render'),?,?,? WHERE (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?").bind(assetId,id,key,size,id,mv,now,id,mv),
+   env.DB.prepare("INSERT INTO clip_assets (id,clip_id,asset_type,storage_key,mime_type,size_bytes,version,metadata_version,created_at) SELECT ?,?,'render',?,'video/webm',?,(SELECT COALESCE(MAX(version),0)+1 FROM clip_assets WHERE clip_id=? AND asset_type='render'),?,? WHERE (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?").bind(assetId,id,key,size,id,mv,now,id,mv),
    env.DB.prepare("UPDATE clips SET status='rendered',updated_at=? WHERE id=? AND workspace_id=? AND (SELECT MAX(version) FROM clip_metadata WHERE clip_id=?)=?").bind(now,id,user.workspace.id,id,mv),
    env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) SELECT ?,?, 'clip',?,'clip_rendered',json_object('assetVersion',(SELECT version FROM clip_assets WHERE id=?),'metadataVersion',?,'sizeBytes',?,'format','webm'),? WHERE EXISTS (SELECT 1 FROM clip_assets WHERE id=?)").bind(crypto.randomUUID(),user.workspace.id,id,assetId,mv,size,now,assetId)
   ]);
