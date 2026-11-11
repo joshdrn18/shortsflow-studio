@@ -56,7 +56,11 @@ def ass_color(hex_color):
     return f"&H00{b}{g}{r}".upper()
 
 def ass_escape(value):
-    return str(value or "").replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}").replace("\n", " ").replace("\r", " ").strip()
+    import re
+    text = str(value or "")
+    text = re.sub(r"</?b\\s*>|&lt;/?b\\s*&gt;", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<!\\w)/b(?!\\w)", " ", text, flags=re.IGNORECASE)
+    return re.sub(r"\\s+", " ", text).replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}").replace("\n", " ").replace("\r", " ").strip()
 
 def make_ass(job, path):
     cfg = job.get("subtitleConfig") or {}
