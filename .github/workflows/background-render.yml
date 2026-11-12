@@ -1,9 +1,11 @@
 name: Background video renderer
-# Queue dispatch is triggered by the Pages render-jobs endpoint; cron remains a recovery fallback.
+# Keep a periodic safety net; pushes also drain the queue immediately.
 
 on:
   push:
     branches: [main]
+  repository_dispatch:
+    types: [render-queued]
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
