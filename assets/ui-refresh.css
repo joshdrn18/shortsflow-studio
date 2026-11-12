@@ -462,3 +462,26 @@ button:disabled{cursor:not-allowed;opacity:.48}
 .settings-muted-note{margin:13px 2px 0;color:#81969e;font-size:9px;line-height:1.65}
 @media(max-width:900px){.settings-layout{grid-template-columns:1fr}.settings-nav{position:static;display:flex;overflow-x:auto;gap:5px;padding:7px}.settings-nav button{flex:0 0 auto;width:auto;min-width:max-content;padding:0 12px}.settings-content{padding:16px}}
 @media(max-width:600px){.settings-intro{align-items:flex-start;padding:20px 18px}.settings-intro h2{font-size:22px}.settings-private{font-size:7px;padding:6px 8px}.settings-nav button{min-height:39px;font-size:10px}.settings-content{padding:13px}.settings-section-heading{align-items:flex-start}.settings-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.settings-stats article{padding:11px}.settings-stats article strong{font-size:21px}.settings-info-card,.settings-safety-card{padding:12px}.settings-system-list>div{padding:11px}}
+
+/* Separate the independently mounted watermark studio from the workspace settings panel */
+#workspace-settings{display:grid;position:relative;z-index:0;margin-bottom:28px}
+#watermark-settings{display:grid;position:relative;z-index:0;clear:both;margin-top:28px;padding-top:22px;border-top:1px solid #2a3b43}
+#watermark-settings .wm-card{padding:25px 27px;border:1px solid #34524c;border-radius:16px;background:linear-gradient(145deg,#14231f 0%,#111b22 48%,#101820 100%);box-shadow:0 15px 38px #0003}
+#watermark-settings .wm-heading{align-items:center;gap:16px;margin-bottom:20px;padding-bottom:17px;border-bottom:1px solid #2a3e42}
+#watermark-settings .wm-kicker{color:#85dabb}
+#watermark-settings .wm-heading h2{font-size:21px;letter-spacing:-.5px}
+#watermark-settings .wm-heading p{max-width:500px}
+#watermark-settings .wm-controls{padding:16px;border:1px solid #293f45;border-radius:12px;background:#101a20}
+#watermark-settings .wm-controls label{gap:8px}
+#watermark-settings .wm-controls input:not([type=checkbox]),#watermark-settings .wm-controls select{height:42px;border-color:#354a50;background:#0c151b;border-radius:8px}
+#watermark-settings .wm-preview-wrap{align-content:start;padding:16px;border:1px solid #293f45;border-radius:12px;background:#101a20}
+#watermark-settings .wm-preview{width:min(100%,230px);border-color:#42695d;box-shadow:0 12px 35px #0005}
+#watermark-settings .wm-preview-wrap p{max-width:270px;text-align:center}
+#watermark-settings #wm-save{min-height:40px;padding:0 17px}
+@media(max-width:700px){
+ #workspace-settings{margin-bottom:20px}
+ #watermark-settings{margin-top:20px;padding-top:17px}
+ #watermark-settings .wm-card{padding:17px}
+ #watermark-settings .wm-heading{align-items:flex-start}
+ #watermark-settings .wm-controls,#watermark-settings .wm-preview-wrap{padding:12px}
+}
