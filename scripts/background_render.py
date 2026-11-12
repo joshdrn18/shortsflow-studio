@@ -163,15 +163,7 @@ def render(job, source, output, workdir):
         raise RuntimeError(f"Rendered MP4 is invalid or exceeds 90 MB ({size} bytes).")
     return size
 
-def main():
-    token = oidc_token()
-    worker = WORKER + "/internal/render/"
-    _, _, response = request(worker + "claim", method="POST", token=token, data=b"{}", content_type="application/json")
-    payload = json.loads(response)
-    job = payload.get("job")
-    if not job:
-        print("No background render jobs queued.")
-        return
+def process_one_job(worker, token, job):
     job_id = job["id"]
     print(f"Claimed background render job {job_id}", flush=True)
     try:
@@ -185,6 +177,7 @@ def main():
             size = render(job, source, output, temp)
             request(worker + "complete?" + urllib.parse.urlencode({"jobId": job_id}), method="POST", token=token, data=output.read_bytes(), content_type="video/mp4", timeout=900)
             print(f"Background render saved to R2 ({size} bytes).", flush=True)
+            return True
     except Exception as error:
         message = str(error)[:900]
         print("Background render failed: " + message, file=sys.stderr, flush=True)
@@ -192,7 +185,27 @@ def main():
             request(worker + "fail?" + urllib.parse.urlencode({"jobId": job_id}), method="POST", token=token, data=json.dumps({"error": message}).encode(), content_type="application/json", timeout=30)
         except Exception as report_error:
             print("Could not report render failure: " + str(report_error), file=sys.stderr)
-        raise
+        return False
+
+def main():
+    token = oidc_token()
+    worker = WORKER + "/internal/render/"
+    max_jobs = 4
+    completed = 0
+    failed = 0
+    for index in range(max_jobs):
+        _, _, response = request(worker + "claim", method="POST", token=token, data=b"{}", content_type="application/json")
+        payload = json.loads(response)
+        job = payload.get("job")
+        if not job:
+            print(f"Queue empty. Processed {completed} render(s), {failed} failed.", flush=True)
+            break
+        if process_one_job(worker, token, job):
+            completed += 1
+        else:
+            failed += 1
+    else:
+        print(f"Reached per-run limit ({max_jobs}). Processed {completed} render(s), {failed} failed; remaining jobs will be picked up by the next runner.", flush=True)
 
 if __name__ == "__main__":
     main()
