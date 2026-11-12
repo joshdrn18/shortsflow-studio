@@ -51,6 +51,8 @@
         </div>
       </div>`;
     $(".page-heading")?.after(panel);
+    const watermarkPanel=$("#watermark-settings");
+    if(watermarkPanel) panel.after(watermarkPanel);
     panel.addEventListener("click", e => {
       const tab=e.target.closest("[data-settings-tab]");
       if(tab){showTab(tab.dataset.settingsTab);return;}
