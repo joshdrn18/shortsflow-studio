@@ -156,7 +156,7 @@ def render(job, source, output, workdir):
         "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
         "-t", str(duration), str(output)
     ]
-    print("Starting background FFmpeg render", flush=True)
+    print("Starting background FFmpeg render (queue-drain mode, up to 4 jobs)", flush=True)
     subprocess.run(command, check=True, timeout=1800)
     size = output.stat().st_size
     if size < 1024 or size > MAX_OUTPUT:
