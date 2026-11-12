@@ -16,7 +16,7 @@
  function round(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
  function drawWords(ctx,words,t,c,w,h,videoBox){
   if(!c.enabled||!Array.isArray(words)||!words.length||!Number.isFinite(t))return;
-  const clean=words.map((item,index)=>({item,index,word:String(item?.word||"").replace(/<\/?b\d*\s*>|&lt;\/?b\d*\s*&gt;|\/b\d*/gi," ").replace(/\s+/g," ").trim(),start:Number(item?.start),end:Number(item?.end)}))
+  const clean=words.map((item,index)=>({item,index,word:String(item?.word||"").replace(/<\/?b\d*\s*>|&lt;\/?b\d*\s*&gt;|(?:\\\\|\/)b\d*/gi," ").replace(/\s+/g," ").trim(),start:Number(item?.start),end:Number(item?.end)}))
    .filter(x=>x.word&&Number.isFinite(x.start)&&Number.isFinite(x.end)&&x.end>x.start);
   if(!clean.length)return;
   const active=clean.findIndex(x=>t>=x.start&&t<=x.end);
