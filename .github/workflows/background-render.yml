@@ -1,4 +1,5 @@
 name: Background video renderer
+# Queue dispatch is triggered by the Pages render-jobs endpoint; cron remains a recovery fallback.
 
 on:
   push:
@@ -32,7 +33,7 @@ jobs:
       - name: Test the FFmpeg pipeline on pushes
         if: github.event_name == 'push'
         run: python3 scripts/test_background_render.py
-      - name: Process one queued render
+      - name: Drain queued renders (up to four)
         env:
           SHORTSFLOW_RENDER_WORKER: https://shortsflow-analysis-engine.inipastiuy-41f.workers.dev
         run: python3 scripts/background_render.py
