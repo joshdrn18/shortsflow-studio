@@ -538,7 +538,7 @@ async function processClipDiscovery(env, job) {
   const winnerGuidance = winnerLearning.patterns.length
     ? " Workspace performance learning from this channel's published Shorts (a light creative hint, not a guarantee): " + winnerLearning.patterns.map((item,index)=>"#"+(index+1)+" title="+item.title+"; hook="+item.hook+"; approx views/day="+item.viewsPerDay+(item.averageViewed===null?"":"; average viewed="+Math.round(item.averageViewed)+"%")).join(" | ") + ". Look for similarly clear hooks and payoff structures only when they genuinely fit this source. Never copy titles or force unrelated topics."
     : "";
-  const system = "You are an expert short-form video editor and social copywriter. Identify self-contained, high-retention moments from timestamped speech. Never invent speech, events, character actions, or timestamps. Metadata quality is mandatory: titles must be specific, descriptive, natural, and normally 4–10 words; never use a one-word reaction such as Wow, Whoa, Yes, or Okay as a title. Captions must be a complete, engaging 1–2 sentence description of the actual moment, not a repeat of the title or a transcript fragment. Hashtags must be 3–6 relevant topical tags grounded in the source and transcript; never output #topic or generic filler. Return valid JSON only." + winnerGuidance;
+  const system = "You are a senior YouTube Shorts story editor and social copywriter. Find self-contained moments with a fast opening, clear context, and satisfying payoff. Never invent speech, events, character actions, facts, or timestamps. Write ALL metadata in the transcript language. Metadata rules are strict: (1) title is a concrete, curiosity-driven summary of THIS exact moment in 4–10 natural words; name the subject/action when supported; avoid vague reaction titles, generic clickbait, and claims not proven by the transcript. (2) hook is the strongest actual opening line from the selected moment, quoted or lightly cleaned without changing its meaning; do not write a generic teaser. (3) reason explains the specific story/payoff in one concise sentence. (4) caption is 1–2 complete natural sentences that add context or tease the payoff without repeating the title, inventing details, or copying a raw transcript fragment. (5) hashtags are 3–6 distinct, specific topic/entity tags grounded in the transcript; include #shorts only as an optional final platform tag, never use #topic, #viral, #fyp, or unrelated tags. Do not use source-title keywords as tags unless the transcript confirms that topic. Return valid compact JSON only." + winnerGuidance;
   // Split long transcripts into overlapping windows so one model response cannot crowd out
   // every candidate. Each window independently searches for 1–3 distinct moments.
   const WINDOW_SECONDS = 150;
@@ -555,7 +555,7 @@ async function processClipDiscovery(env, job) {
   for (let windowIndex = 0; windowIndex < windows.length; windowIndex++) {
     const window = windows[windowIndex];
     const timeline = window.words.map(w => "[" + Number(w.start).toFixed(2) + "-" + Number(w.end).toFixed(2) + "] " + String(w.word || "")).join(" ");
-    const prompt = "Find 1 to 3 of the strongest distinct short-form clips inside this transcript window. Each must be 15–60 seconds, start with a compelling hook, make sense on its own, and end on a complete thought, joke, reveal, or payoff. Prefer meaningful moments; avoid greetings, filler, repeated lines and incomplete sentences. Use ONLY the supplied absolute word timestamps. Return fewer only if this window truly has fewer viable moments. Rank strongest first. Return compact JSON only: {\"candidates\":[{\"startSeconds\":12.3,\"endSeconds\":42.8,\"title\":\"Specific engaging title\",\"hook\":\"Opening line\",\"reason\":\"Why this moment works\",\"caption\":\"Short caption\",\"hashtags\":[\"#shorts\",\"#topic\"],\"score\":91}]}. Full source duration: " + duration.toFixed(2) + " seconds. Search window: " + window.from.toFixed(2) + "–" + window.to.toFixed(2) + " seconds. Transcript language: " + (transcript.language || "auto-detected") + ". Timestamped transcript: " + timeline;
+    const prompt = "Find 1 to 3 strongest DISTINCT Shorts moments in this transcript window. Each clip must be 15–60 seconds, open with a real compelling line, include enough context to understand it, and end on a complete thought, reveal, joke, useful tip, or payoff. Prioritize surprising specifics, emotional turns, clear demonstrations, strong opinions, useful explanations, and memorable story beats. Reject greetings, filler, repeated content, weak setup-only sections, and incomplete sentences. Use ONLY supplied absolute word timestamps. For every candidate, write metadata in the transcript language: a specific 4–10-word title, an authentic opening hook grounded in the first seconds, a one-sentence reason explaining the actual payoff, a natural 1–2 sentence caption that adds context, and 3–6 relevant tags based on actual transcript entities/topics (not generic tags). Do not invent context. Return fewer candidates rather than padding weak moments. Rank strongest first. Return compact JSON only: {\"candidates\":[{\"startSeconds\":12.3,\"endSeconds\":42.8,\"title\":\"Specific subject and payoff\",\"hook\":\"Actual opening line\",\"reason\":\"Specific reason this moment pays off.\",\"caption\":\"Natural post caption with useful context.\",\"hashtags\":[\"#SpecificTopic\",\"#SpecificEntity\",\"#shorts\"],\"score\":91}]}. Full source duration: " + duration.toFixed(2) + " seconds. Search window: " + window.from.toFixed(2) + "–" + window.to.toFixed(2) + " seconds. Transcript language: " + (transcript.language || "auto-detected") + ". Timestamped transcript: " + timeline;
     const inputTokens = Math.ceil((system.length + prompt.length) / 3);
     if (!await reserveTextBudget(env, `discovery:${job.id}:${Number(job.attempts || 0)}:${windowIndex}`, inputTokens, 1100)) {
       throw new Error("Daily AI safety budget reached during clip discovery. Retry after the UTC reset.");
@@ -777,18 +777,28 @@ async function processClipDiscovery(env, job) {
     });
     if (duplicateContent) { rejected.duplicateContent++; continue; }
 
-    const hook = String(candidate.hook || candidate.title || "").trim().slice(0, 220);
+    const hook = String(candidate.hook || excerpt.split(/(?<=[.!?])\\s+/)[0] || excerpt.split(/\\s+/).slice(0, 14).join(" ")).trim().slice(0, 220);
     if (!hook) { rejected.missingHook++; continue; }
     const proposedTitle = String(candidate.title || "").trim();
     const genericTitle = /^(yes|yeah|yep|no|okay|ok|wow|whoa|oh|hey|look|wait|what|huh|hello|hi)[.!?\s]*$/i.test(proposedTitle);
     const title = String(genericTitle ? (candidate.reason || excerpt.split(/[.!?]/)[0] || candidate.hook) : (proposedTitle || candidate.reason || excerpt.split(/[.!?]/)[0] || "Untitled clip")).trim().slice(0, 120);
-    let hashtagList = Array.isArray(candidate.hashtags) ? candidate.hashtags : String(candidate.hashtags || "").split(/\s+/);
-    hashtagList = hashtagList.map(tag => String(tag).trim().replace(/^#?/, "#").replace(/[^#\p{L}\p{N}_]/gu, "")).filter(tag => tag.length > 1 && !/^#(topic|viral|fyp)$/i.test(tag));
+    let hashtagList = Array.isArray(candidate.hashtags) ? candidate.hashtags : String(candidate.hashtags || "").split(/\\s+/);
+    hashtagList = hashtagList.map(tag => String(tag).trim().replace(/^#?/, "#").replace(/[^#\\p{L}\\p{N}_]/gu, ""))
+      .filter(tag => tag.length > 2 && !/^#(topic|viral|fyp|shorts|trending|funny|wow)$/i.test(tag));
     if (hashtagList.length < 3) {
-      const sourceTags = sourceTitle.toLowerCase().match(/[a-z0-9]+/g) || [];
-      const derived = sourceTags.filter(word => word.length > 3 && !["more","back","school","minutes","missions"].includes(word)).slice(0, 4).map(word => "#" + word);
-      hashtagList = [...new Set([...hashtagList, ...derived, "#shorts"])];
+      // Derive fallback tags from the selected transcript, not just the uploaded
+      // filename, which is often generic or unrelated to the clip itself.
+      const stop = new Set("the and for that with this from have your you are was were what when where who why how then than into about there their they them his her she him its our out but not can could would should just like really very will all one two three a an to of in on at as is it be or if we i me my he do did does so up down".split(" "));
+      const counts = new Map();
+      for (const token of (excerpt + " " + sourceTitle).toLowerCase().match(/[\\p{L}\\p{N}]{4,}/gu) || []) {
+        if (stop.has(token) || /^\\d+$/.test(token)) continue;
+        counts.set(token, (counts.get(token) || 0) + 1);
+      }
+      const derived = [...counts.entries()].sort((a,b) => b[1]-a[1] || b[0].length-a[0].length)
+        .slice(0, 5).map(([word]) => "#" + word);
+      hashtagList = [...new Set([...hashtagList, ...derived])];
     }
+    if (hashtagList.length < 3) hashtagList.push("#shorts");
     const hashtags = [...new Set(hashtagList)].slice(0, 6).join(" ");
     let caption = String(candidate.caption || "").trim();
     const genericCaption = !caption || caption.length < 35 || caption.toLowerCase() === title.toLowerCase() || /^(whoa|wow|yes|yeah|okay|ok|oh)[.!?\s]*$/i.test(caption);
