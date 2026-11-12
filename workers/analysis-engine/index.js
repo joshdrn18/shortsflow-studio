@@ -678,7 +678,6 @@ async function processClipDiscovery(env, job) {
       specificityQuality = Math.min(1, 0.35 + concreteTerms.size * 0.12);
       const storySignals = /\\b(but|however|because|so|then|until|instead|finally|turns out|which means|therefore|ternyata|tetapi|tapi|karena|sehingga|sampai|akhirnya|justru|malah|akibatnya|ternyata)\\b/i;
       const contrastSignals = /\\b(but|however|although|instead|surprisingly|unexpected|ternyata|tetapi|tapi|justru|malah|ternyata)\\b/i;
-      storyArcQuality = (storySignals.test(spokenText) ? 0.55 : 0.3) + (contrastSignals.test(spokenText) ? 0.25 : 0) + (hasClosingSignal ? 0.2 : 0);
       const densityQuality = wordsPerSecond >= 1.2 && wordsPerSecond <= 4.5
         ? 1 : wordsPerSecond >= 0.7 && wordsPerSecond <= 5.5 ? 0.65 : 0.25;
       const normalizedWords = spokenWords.map(word => word.word.toLowerCase().replace(/[^\\p{L}\\p{N}]/gu, "")).filter(Boolean);
@@ -692,6 +691,7 @@ async function processClipDiscovery(env, job) {
       const hasOpeningSignal = /[?!:]|\\b(why|how|what|never|because|secret|watch|look|imagine|wait|but|suddenly|ternyata|kenapa|bagaimana|mengapa|rahasia|lihat|bayangkan|tiba-tiba)\\b/i.test(firstWords);
       const hasClosingSignal = /[.!?…]["')\\]]?\\s*$/.test(lastWords) ||
         /\\b(so|therefore|that's why|in the end|finally|turns out|which means|jadi|makanya|akhirnya|ternyata|kesimpulannya)\\b/i.test(lastWords);
+      storyArcQuality = (storySignals.test(spokenText) ? 0.55 : 0.3) + (contrastSignals.test(spokenText) ? 0.25 : 0) + (hasClosingSignal ? 0.2 : 0);
       const openingQuality = hasOpeningSignal ? 1 : 0.55;
       const closingQuality = hasClosingSignal ? 1 : 0.4;
       const lengthQuality = wordCount >= 28 ? 1 : wordCount >= 18 ? 0.7 : 0.3;
