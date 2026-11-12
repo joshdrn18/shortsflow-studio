@@ -646,6 +646,10 @@ async function processClipDiscovery(env, job) {
     // repetition, or an abrupt ending with no complete thought.
     let transcriptQuality = 0.5;
     let retentionQuality = 0.5;
+    let continuityQuality = 0.65;
+    let durationFitQuality = 0.65;
+    let specificityQuality = 0.5;
+    let storyArcQuality = 0.45;
     const rawStart = Number(candidate.startSeconds ?? candidate.start_seconds);
     const rawEnd = Number(candidate.endSeconds ?? candidate.end_seconds);
     if (Number.isFinite(rawStart) && Number.isFinite(rawEnd) && rawEnd > rawStart) {
@@ -659,6 +663,22 @@ async function processClipDiscovery(env, job) {
       const wordCount = spokenWords.length;
       const clipSeconds = absoluteEnd - absoluteStart;
       const wordsPerSecond = wordCount / Math.max(1, clipSeconds);
+      // Penalize long dead-air gaps using actual word timestamps; a clip with
+      // a strong transcript but several silent stretches is less likely to retain viewers.
+      let silentGap = 0;
+      for (let i = 1; i < spokenWords.length; i++) {
+        silentGap += Math.max(0, Number(spokenWords[i].start) - Number(spokenWords[i - 1].end) - 0.35);
+      }
+      const gapRatio = silentGap / Math.max(1, clipSeconds);
+      continuityQuality = gapRatio <= 0.04 ? 1 : gapRatio <= 0.10 ? 0.8 : gapRatio <= 0.18 ? 0.55 : 0.25;
+      durationFitQuality = clipSeconds >= 24 && clipSeconds <= 42 ? 1 :
+        clipSeconds >= 20 && clipSeconds <= 48 ? 0.82 :
+        clipSeconds >= 15 && clipSeconds <= 55 ? 0.62 : 0.4;
+      const concreteTerms = new Set((spokenWords.map(w => w.word).join(" ").match(/\\b[A-Z][\\p{L}\\p{N}_-]{2,}\\b|\\b\\d+(?:[.,]\\d+)?%?\\b/gu) || []).map(v => v.toLowerCase()));
+      specificityQuality = Math.min(1, 0.35 + concreteTerms.size * 0.12);
+      const storySignals = /\\b(but|however|because|so|then|until|instead|finally|turns out|which means|therefore|ternyata|tetapi|tapi|karena|sehingga|sampai|akhirnya|justru|malah|akibatnya|ternyata)\\b/i;
+      const contrastSignals = /\\b(but|however|although|instead|surprisingly|unexpected|ternyata|tetapi|tapi|justru|malah|ternyata)\\b/i;
+      storyArcQuality = (storySignals.test(spokenText) ? 0.55 : 0.3) + (contrastSignals.test(spokenText) ? 0.25 : 0) + (hasClosingSignal ? 0.2 : 0);
       const densityQuality = wordsPerSecond >= 1.2 && wordsPerSecond <= 4.5
         ? 1 : wordsPerSecond >= 0.7 && wordsPerSecond <= 5.5 ? 0.65 : 0.25;
       const normalizedWords = spokenWords.map(word => word.word.toLowerCase().replace(/[^\\p{L}\\p{N}]/gu, "")).filter(Boolean);
@@ -684,14 +704,19 @@ async function processClipDiscovery(env, job) {
         openingQuality * 0.20 + closingQuality * 0.20 + lengthQuality * 0.10 +
         openingPaceQuality * 0.15;
     }
+    // Explainable editorial score: metadata cannot outweigh the actual spoken
+    // moment. The strongest signals are the opening, story payoff, pacing and completion.
+    const metadataQuality = titleQuality * 0.45 + captionQuality * 0.35 + contextQuality * 0.20;
     const qualityScore = 100 * (
-      hookQuality * 0.20 +
-      contextQuality * 0.20 +
-      titleQuality * 0.10 +
-      captionQuality * 0.10 +
-      payoffQuality * 0.15 +
-      transcriptQuality * 0.15 +
-      retentionQuality * 0.10
+      hookQuality * 0.18 +
+      retentionQuality * 0.14 +
+      storyArcQuality * 0.14 +
+      continuityQuality * 0.10 +
+      durationFitQuality * 0.08 +
+      specificityQuality * 0.08 +
+      transcriptQuality * 0.12 +
+      payoffQuality * 0.10 +
+      metadataQuality * 0.06
     );
     // Keep the model's score as the persisted AI score, but rank with a blended
     // score so transcript substance and a self-contained ending influence selection.
@@ -707,10 +732,16 @@ async function processClipDiscovery(env, job) {
       }
     }
     const learningBonus = Math.round(winnerSimilarity * 5 * winnerLearning.confidence * 10) / 10;
-    // Historical channel winners guide ranking lightly; editorial quality remains dominant.
-    const rankScore = score * 0.60 + qualityScore * 0.40 + learningBonus;
+    // Blend the model's initial opinion with transcript-derived editorial signals.
+    // Channel history is only a small tie-breaker, never a promise of virality.
+    const rankScore = score * 0.25 + qualityScore * 0.75 + Math.min(2.5, learningBonus);
     return { candidate, score, qualityScore: Math.round(qualityScore),
-      transcriptQuality: Math.round(transcriptQuality * 100), learningBonus, rankScore: Math.round(rankScore) };
+      transcriptQuality: Math.round(transcriptQuality * 100),
+      retentionQuality: Math.round(retentionQuality * 100),
+      continuityQuality: Math.round(continuityQuality * 100),
+      durationFitQuality: Math.round(durationFitQuality * 100),
+      storyArcQuality: Math.round(storyArcQuality * 100),
+      learningBonus, rankScore: Math.max(0, Math.min(100, Math.round(rankScore))) };
   }).sort((a,b) => b.rankScore - a.rankScore || b.score - a.score);
 
   for (const item of ranked) {
@@ -808,13 +839,13 @@ async function processClipDiscovery(env, job) {
     const clipId = crypto.randomUUID();
     const metadataId = crypto.randomUUID();
     const now = new Date().toISOString();
-    accepted.push({ start, end, score: item.score, transcript: excerpt, title, hook });
+    accepted.push({ start, end, score: item.rankScore, transcript: excerpt, title, hook });
     await env.DB.batch([
       env.DB.prepare(
         `INSERT OR IGNORE INTO clips
          (id, workspace_id, source_video_id, title, start_seconds, end_seconds, hook, ai_score, transcript, status, discovery_job_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'discovered', ?, ?, ?)`
-      ).bind(clipId, job.workspace_id, job.source_video_id, title, start, end, hook, item.score, excerpt, job.id, now, now),
+      ).bind(clipId, job.workspace_id, job.source_video_id, title, start, end, hook, item.rankScore, excerpt, job.id, now, now),
       env.DB.prepare(
         `INSERT OR IGNORE INTO clip_metadata (id, clip_id, version, title, caption, hashtags, language, created_at)
          SELECT ?, c.id, 1, ?, ?, ?, ?, ?
