@@ -735,7 +735,18 @@ async function processClipDiscovery(env, job) {
     // Blend the model's initial opinion with transcript-derived editorial signals.
     // Channel history is only a small tie-breaker, never a promise of virality.
     const rankScore = score * 0.25 + qualityScore * 0.75 + Math.min(2.5, learningBonus);
-    return { candidate, score, qualityScore: Math.round(qualityScore),
+    const scoreBreakdown = {
+      hook: Math.round(hookQuality * 100),
+      retention: Math.round(retentionQuality * 100),
+      storyArc: Math.round(storyArcQuality * 100),
+      continuity: Math.round(continuityQuality * 100),
+      durationFit: Math.round(durationFitQuality * 100),
+      specificity: Math.round(specificityQuality * 100),
+      transcript: Math.round(transcriptQuality * 100),
+      payoff: Math.round(payoffQuality * 100),
+      metadata: Math.round(metadataQuality * 100)
+    };
+    return { candidate, score, qualityScore: Math.round(qualityScore), scoreBreakdown,
       transcriptQuality: Math.round(transcriptQuality * 100),
       retentionQuality: Math.round(retentionQuality * 100),
       continuityQuality: Math.round(continuityQuality * 100),
@@ -843,9 +854,9 @@ async function processClipDiscovery(env, job) {
     await env.DB.batch([
       env.DB.prepare(
         `INSERT OR IGNORE INTO clips
-         (id, workspace_id, source_video_id, title, start_seconds, end_seconds, hook, ai_score, transcript, status, discovery_job_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'discovered', ?, ?, ?)`
-      ).bind(clipId, job.workspace_id, job.source_video_id, title, start, end, hook, item.rankScore, excerpt, job.id, now, now),
+         (id, workspace_id, source_video_id, title, start_seconds, end_seconds, hook, ai_score, transcript, score_breakdown_json, status, discovery_job_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'discovered', ?, ?, ?)`
+      ).bind(clipId, job.workspace_id, job.source_video_id, title, start, end, hook, item.rankScore, excerpt, JSON.stringify(item.scoreBreakdown), job.id, now, now),
       env.DB.prepare(
         `INSERT OR IGNORE INTO clip_metadata (id, clip_id, version, title, caption, hashtags, language, created_at)
          SELECT ?, c.id, 1, ?, ?, ?, ?, ?
