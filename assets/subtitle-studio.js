@@ -69,7 +69,7 @@
     }
     if(current.length)groups.push(current);
     const group=groups.find(items=>items.some(w=>w===words[active]))||[];const key=String(words.indexOf(group[0]))+":"+active;if(overlay.dataset.renderKey===key)return;overlay.dataset.renderKey=key;
-    overlay.innerHTML=group.map(w=>'<span class="'+(w===words[active]?"is-active":"")+'">'+esc(w.word)+'</span>').join(" ");
+    overlay.innerHTML=group.map(w=>'<span class="'+(w===words[active]?"is-active":"")+'">'+esc(String(w.word||"").replace(/<\/?b\d*\s*>|&lt;\/?b\d*\s*&gt;|(?:\\\\|\/)b\d*/gi," ").replace(/\s+/g," ").trim())+'</span>').join(" ");
   }
   async function load(){
     const clip=window.__shortsflowActiveClip;
