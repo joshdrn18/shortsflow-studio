@@ -4,7 +4,7 @@ import sqlite3
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
 
-expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql", "0016_workspace_brand_profiles.sql", "0017_brand_profile_metadata.sql", "0018_youtube_metric_snapshots.sql", "0019_youtube_retention_metrics.sql", "0020_background_render_jobs.sql"]
+expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql", "0016_workspace_brand_profiles.sql", "0017_brand_profile_metadata.sql", "0018_youtube_metric_snapshots.sql", "0019_youtube_retention_metrics.sql", "0020_background_render_jobs.sql", "0021_clip_score_breakdown.sql"]
 actual = [path.name for path in MIGRATIONS]
 if actual != expected:
     raise SystemExit(f"Unexpected migration sequence: {actual}")
@@ -59,6 +59,9 @@ for required_column in ("workspace_id", "clip_id", "metadata_version", "status",
 clip_columns = {row[1] for row in connection.execute("PRAGMA table_info(clips)")}
 if "discovery_job_id" not in clip_columns:
     raise SystemExit("clips.discovery_job_id is missing")
+
+if "score_breakdown_json" not in clip_columns:
+    raise SystemExit("clips.score_breakdown_json is missing")
 
 clip_indexes = {
     row[1] for row in connection.execute("PRAGMA index_list(clips)")
