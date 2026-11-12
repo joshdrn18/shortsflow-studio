@@ -31,15 +31,18 @@ export async function onRequestGet({ request, env }) {
       : 2 * 60 * 1000;
 
     let queuedAhead = 0;
+    let runningRemainingMs = 0;
     const now = Date.now();
     const items = (active.results || []).map(row => {
       const created = Date.parse(row.created_at);
       const elapsed = Number.isFinite(created) ? Math.max(0, now - created) : 0;
       let remainingMs;
-      if (row.status === "running") remainingMs = Math.max(0, avgMs - elapsed);
-      else {
+      if (row.status === "running") {
+        remainingMs = Math.max(0, avgMs - elapsed);
+        runningRemainingMs = Math.max(runningRemainingMs, remainingMs);
+      } else {
         queuedAhead += 1;
-        remainingMs = avgMs * queuedAhead;
+        remainingMs = runningRemainingMs + avgMs * queuedAhead;
       }
       return {
         id: row.id,
@@ -58,7 +61,7 @@ export async function onRequestGet({ request, env }) {
     });
     const running = items.filter(item => item.status === "running").length;
     const queued = items.filter(item => item.status === "queued").length;
-    const queueAheadMs = items.reduce((sum,item)=>sum + item.estimatedRemainingMs,0);
+    const queueAheadMs = runningRemainingMs + avgMs * queued;
     return json({
       ok: true,
       items,
