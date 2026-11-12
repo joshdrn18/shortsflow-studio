@@ -1,15 +1,17 @@
-function cleanSpeechToken(value) {
-  return String(value ?? "")
-    .replace(/<\/?b\d*\s*>|&lt;\/?b\d*\s*&gt;|(?:\\|\/)b\d*/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}const MODEL = "@cf/openai/whisper";
+const MODEL = "@cf/openai/whisper";
 const CLIP_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
 const CHUNK_SECONDS = 60;
 const MAX_SOURCE_SECONDS = 1800;
 const DAILY_NEURON_BUDGET = 8000;
 const NEURONS_PER_AUDIO_MINUTE = 41.14;
 const LOCK_SECONDS = 600;
+
+function cleanSpeechToken(value) {
+  return String(value ?? "")
+    .replace(/<\/?b\d*\s*>|&lt;\/?b\d*\s*&gt;|(?:\\|\/)b\d*/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 
 const TOKEN_KEY_BYTES = 32;
