@@ -744,7 +744,12 @@ async function processClipDiscovery(env, job) {
       specificity: Math.round(specificityQuality * 100),
       transcript: Math.round(transcriptQuality * 100),
       payoff: Math.round(payoffQuality * 100),
-      metadata: Math.round(metadataQuality * 100)
+      metadata: Math.round(metadataQuality * 100),
+      channelLearning: Math.round(Math.min(100, learningBonus / 2.5 * 100)),
+      learningBonus: Math.round(learningBonus * 10) / 10,
+      learningConfidence: Math.round(winnerLearning.confidence * 100),
+      learningSampleSize: winnerLearning.sampleSize,
+      retentionSampleSize: winnerLearning.retentionSampleSize || 0
     };
     return { candidate, score, qualityScore: Math.round(qualityScore), scoreBreakdown,
       transcriptQuality: Math.round(transcriptQuality * 100),
