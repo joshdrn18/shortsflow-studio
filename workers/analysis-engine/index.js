@@ -417,12 +417,12 @@ async function processNextJob(env) {
     ).bind(transcriptId, job.workspace_id).first();
     const priorText = String(current?.transcript_text || "");
     const language = String(result?.transcription_info?.language || result?.language || "") || null;
-    const nextText = [priorText, String(result?.text || "").trim()].filter(Boolean).join(" ").slice(0, 250000);
+    const nextText = [cleanSpeechToken(priorText), cleanSpeechToken(result?.text || "")].filter(Boolean).join(" ").slice(0, 250000);
     let priorWords = [];
     try { priorWords = JSON.parse(current?.segments_json || "[]"); } catch { priorWords = []; }
     if (!Array.isArray(priorWords)) priorWords = [];
     const words = Array.isArray(result?.words) ? result.words.map(word => {
-      const token = String(word?.word || word?.text || "").replace(/\s+/g, " ").trim();
+      const token = cleanSpeechToken(word?.word || word?.text || "");
       const localStart = Number(word?.start);
       const localEnd = Number(word?.end);
       if (!token || !Number.isFinite(localStart) || !Number.isFinite(localEnd) || localEnd <= localStart) return null;
@@ -891,9 +891,9 @@ async function processBrowserAudioChunk(request, env) {
   if(!withinBudget)return json({ok:false,error:"Daily AI safety budget reached. Retry after the UTC reset."},429);
   const result=await env.AI.run(MODEL,{audio:Array.from(audio)});
   const current=await env.DB.prepare("SELECT transcript_text,segments_json FROM source_transcripts WHERE id=? AND workspace_id=?").bind(transcript.id,workspaceId).first();
-  const offset=chunkIndex*60,nextText=[String(current?.transcript_text||""),String(result?.text||"").trim()].filter(Boolean).join(" ").slice(0,250000);
+   const offset=chunkIndex*60,nextText=[cleanSpeechToken(current?.transcript_text||""),cleanSpeechToken(result?.text||"")].filter(Boolean).join(" ").slice(0,250000);
   let prior=[];try{prior=JSON.parse(current?.segments_json||"[]");}catch{}
-  const words=Array.isArray(result?.words)?result.words.map(w=>({word:String(w.word||w.text||""),start:Number(w.start||0)+offset,end:Number(w.end||w.start||0)+offset})).filter(w=>w.word&&Number.isFinite(w.start)&&Number.isFinite(w.end)):[];
+  const words=Array.isArray(result?.words)?result.words.map(w=>({word:cleanSpeechToken(w.word||w.text||""),start:Number(w.start||0)+offset,end:Number(w.end||w.start||0)+offset})).filter(w=>w.word&&Number.isFinite(w.start)&&Number.isFinite(w.end)):[];
   const combined=prior.concat(words).slice(0,30000),now=new Date().toISOString();
   await env.DB.prepare("UPDATE source_transcripts SET transcript_text=?,segments_json=?,language=COALESCE(?,language),updated_at=? WHERE id=? AND workspace_id=?").bind(nextText,JSON.stringify(combined),String(result?.transcription_info?.language||result?.language||"")||null,now,transcript.id,workspaceId).run();
   if(chunkIndex===totalChunks-1){
@@ -962,7 +962,7 @@ async function handleBackgroundRender(request,env,url){
    WHERE j.id=? AND j.runner_id=? AND j.status='running'`).bind(claimed.id,runner.runnerId).first();
   if(!data||!data.source_key){await env.DB.prepare("UPDATE clip_render_jobs SET status='failed',last_error='Private source video is missing.',updated_at=? WHERE id=?").bind(iso,claimed.id).run();return json({ok:false,error:"Source video is missing."},404);}
   let words=[];try{words=JSON.parse(data.segments_json||"[]");}catch{}
-  words=(Array.isArray(words)?words:[]).filter(w=>w&&typeof w.word==="string"&&Number.isFinite(Number(w.start))&&Number.isFinite(Number(w.end))&&Number(w.end)>Number(data.start_seconds)&&Number(w.start)<Number(data.end_seconds)).slice(0,10000).map(w=>({word:w.word,start:Math.max(0,Number(w.start)-Number(data.start_seconds)),end:Math.max(0,Number(w.end)-Number(data.start_seconds))}));
+  words=(Array.isArray(words)?words:[]).filter(w=>w&&typeof w.word==="string"&&Number.isFinite(Number(w.start))&&Number.isFinite(Number(w.end))&&Number(w.end)>Number(data.start_seconds)&&Number(w.start)<Number(data.end_seconds)).slice(0,10000).map(w=>({word:cleanSpeechToken(w.word),start:Math.max(0,Number(w.start)-Number(data.start_seconds)),end:Math.max(0,Number(w.end)-Number(data.start_seconds))}));
   let config={};try{config=JSON.parse(data.subtitle_config_json||"{}");}catch{}
   return json({ok:true,job:{id:data.id,workspaceId:data.workspace_id,clipId:data.clip_id,sourceId:data.source_video_id,metadataVersion:Number(data.metadata_version),sourceKey:data.source_key,sourceMime:data.source_mime,sourceSize:Number(data.source_size||0),startSeconds:Number(data.start_seconds),endSeconds:Number(data.end_seconds),title:data.title||"",caption:data.caption||"",hashtags:data.hashtags||"",language:data.language||"",words,subtitleConfig:config,watermark:{watermarkEnabled:data.watermark_enabled===null?true:Boolean(data.watermark_enabled),watermarkText:data.watermark_text||"YOUR BRAND",watermarkPosition:data.watermark_position||"bottom-right",watermarkOpacity:Number(data.watermark_opacity??0.72),watermarkScale:data.watermark_scale||"medium"}}});
  }
