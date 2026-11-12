@@ -25,6 +25,7 @@ const views = {
   clips: ["Clip discovery", "Review AI-detected moments and potential short-form cuts."],
   review: ["Review center", "Your approval is required before any clip can be published."],
   library: ["Content library", "Browse rendered videos, drafts and published content."],
+  rendering: ["Rendering", "Track active renders, queue positions and estimated wait times."],
   publisher: ["Publisher", "Connect YouTube and manage approved publishing jobs."],
   settings: ["Settings", "Configure your workspace and production preferences."]
 };
@@ -54,7 +55,7 @@ function ensurePlaceholder() {
 function hideAllPagePanels() {
   [
     ".welcome-panel", ".section-head", ".stats-grid", ".lower-grid",
-    "#sources-workspace", "#clips-workspace", "#review-workspace", "#library-workspace", "#publisher-workspace", "#watermark-settings", "#workspace-settings", "#feature-placeholder"
+    "#sources-workspace", "#clips-workspace", "#review-workspace", "#library-workspace", "#publisher-workspace", "#rendering-workspace", "#watermark-settings", "#workspace-settings", "#feature-placeholder"
   ].forEach((selector) => $(selector)?.classList.add("hidden"));
 }
 
@@ -73,7 +74,7 @@ function navigate(view) {
 
   if (next === "overview") {
     [".welcome-panel", ".section-head", ".stats-grid", ".lower-grid"].forEach((selector) => $(selector)?.classList.remove("hidden"));
-  } else if (next === "sources" || next === "clips" || next === "review" || next === "library" || next === "publisher" || next === "settings") {
+  } else if (next === "sources" || next === "clips" || next === "review" || next === "library" || next === "publisher" || next === "rendering" || next === "settings") {
     document.dispatchEvent(new CustomEvent("shortsflow:view", { detail: { view: next } }));
   } else {
     const panel = ensurePlaceholder();
