@@ -1,4 +1,4 @@
-import { json, getSessionUser } from "../_lib/auth.js";
+import { json, getSessionUser } from "./_lib/auth.js";
 
 export async function onRequestGet({ request, env }) {
   if (!env.DB) return json({ ok: false, error: "Database is not configured." }, 503);
