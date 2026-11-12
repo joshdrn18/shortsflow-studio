@@ -1,7 +1,7 @@
 import { json, getSessionUser } from "../../_lib/auth.js";
 const ID=/^[0-9a-f-]{36}$/i;
 async function wakeRenderRunner(env){
- const token=env.GITHUB_DISPATCH_TOKEN;
+ const token=env.GITHUB_ACTIONS_TOKEN||env.GITHUB_DISPATCH_TOKEN;
  if(!token)return false;
  try{
   const response=await fetch("https://api.github.com/repos/joshdrn18/shortsflow-studio/actions/workflows/background-render.yml/dispatches",{
