@@ -17,7 +17,10 @@ export async function onRequestGet({request,env,params}){
   if(!row)return json({ok:false,error:"Rendered video was not found in this workspace."},404);
   if(!assetId && Number(row.metadata_version)!==Number(row.current_version))return json({ok:false,error:"This render belongs to an older edit. Render the latest version again."},409);
   const head=await env.MEDIA.head(row.storage_key);if(!head)return json({ok:false,error:"Rendered video is missing."},404);
-  const h=new Headers({"Content-Type":row.mime_type||"video/webm","Content-Disposition":url.searchParams.get("download")==="1"?'attachment; filename="shortsflow-render-v'+Number(row.version)+'.webm"':'inline; filename="shortsflow-render-v'+Number(row.version)+'.webm"',"Accept-Ranges":"bytes","Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"});
+  const mime=row.mime_type||"video/mp4";
+  const extension=mime.includes("webm")?"webm":"mp4";
+  const filename="shortsflow-render-v"+Number(row.version)+"."+extension;
+  const h=new Headers({"Content-Type":mime,"Content-Disposition":(url.searchParams.get("download")==="1"?"attachment":"inline")+'; filename="'+filename+'"',"Accept-Ranges":"bytes","Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff"});
   const r=rangeOf(request.headers.get("Range"),head.size);if(r?.invalid){h.set("Content-Range",`bytes */${head.size}`);return new Response(null,{status:416,headers:h});}
   const obj=r?await env.MEDIA.get(row.storage_key,{range:{offset:r.start,length:r.length}}):await env.MEDIA.get(row.storage_key);if(!obj)return json({ok:false,error:"Rendered video is missing."},404);
   if(r){h.set("Content-Range",`bytes ${r.start}-${r.end}/${head.size}`);h.set("Content-Length",String(r.length));return new Response(obj.body,{status:206,headers:h});}
