@@ -684,3 +684,20 @@ button:disabled{cursor:not-allowed;opacity:.48}
  .review-actions{grid-template-columns:1fr}
  .review-actions .primary-button{grid-column:auto}
 }
+
+
+/* Explainable viral-potential score */
+.clip-score-details{border:0;background:transparent;color:#85cdb2;font:700 9px "DM Sans";padding:2px 0;cursor:pointer}
+.clip-score-details:hover{color:#c4f4df;text-decoration:underline}
+.clip-score-breakdown{margin-top:13px;padding:13px;background:#101b22;border:1px solid #2a4549;border-radius:11px}
+.clip-breakdown-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#9ce2c4;font-size:9px;font-weight:800;letter-spacing:1.1px;margin-bottom:12px}
+.clip-breakdown-heading small{color:#82979c;font-size:8px;font-weight:500;letter-spacing:0;text-align:right}
+.clip-breakdown-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}
+.clip-breakdown-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 8px;align-items:center}
+.clip-breakdown-item b{display:block;color:#d9e9e8;font-size:10px;font-weight:700}
+.clip-breakdown-item small{display:block;color:#81979b;font-size:8px;margin-top:2px}
+.clip-breakdown-item strong{color:#b8e9d4;font:800 13px Manrope}
+.clip-breakdown-item strong i{font:500 8px "DM Sans";color:#81979b}
+.clip-breakdown-track{grid-column:1/-1;height:4px;border-radius:9px;background:#26373c;overflow:hidden}
+.clip-breakdown-track i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,#438d77,#8de0bb)}
+@media(max-width:640px){.clip-breakdown-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.clip-breakdown-heading{align-items:flex-start;flex-direction:column}.clip-breakdown-heading small{text-align:left}}
