@@ -1,4 +1,9 @@
-const MODEL = "@cf/openai/whisper";
+function cleanSpeechToken(value) {
+  return String(value ?? "")
+    .replace(/<\/?b\d*\s*>|&lt;\/?b\d*\s*&gt;|(?:\\|\/)b\d*/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}const MODEL = "@cf/openai/whisper";
 const CLIP_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
 const CHUNK_SECONDS = 60;
 const MAX_SOURCE_SECONDS = 1800;
