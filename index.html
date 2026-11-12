@@ -12,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/styles.css?v=20261112-ui8">
   <link rel="stylesheet" href="/assets/ui-refresh.css?v=20261112-ui8">
+  <link rel="stylesheet" href="/assets/rendering-queue.css?v=20261112-queue1">
 </head>
 <body>
   <div class="app-shell">
@@ -27,6 +28,7 @@
         <button class="nav-item" data-view="clips"><span class="nav-icon">▧</span>Clip discovery</button>
         <button class="nav-item" data-view="review"><span class="nav-icon">◉</span>Review center <span class="nav-count" id="review-count">0</span></button>
         <button class="nav-item" data-view="library"><span class="nav-icon">▦</span>Content library</button>
+        <button class="nav-item" data-view="rendering"><span class="nav-icon">◷</span>Rendering <span class="nav-count" id="rendering-nav-count">0</span></button>
         <button class="nav-item" data-view="publisher"><span class="nav-icon">↗</span>Publisher</button>
       </nav>
       <div class="sidebar-bottom">
@@ -109,6 +111,7 @@
   <script src="/assets/publisher.js?v=20261112-ui8" defer></script>
   <script src="/assets/subtitle-studio.js?v=20261112-ui8" defer></script>
   <script src="/assets/render-studio.js?v=20261112-ui8" defer></script>
+  <script src="/assets/rendering-queue.js?v=20261112-queue1" defer></script>
   <script src="/assets/watermark.js?v=20261112-ui8" defer></script>
   <script src="/assets/settings.js?v=20261112-ui8" defer></script>
 </body>
