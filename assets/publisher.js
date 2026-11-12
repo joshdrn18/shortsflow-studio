@@ -27,7 +27,7 @@
   $("#youtube-connect").addEventListener("click",e=>{e.preventDefault();window.location.href="/api/youtube/connect";});
   $("#publisher-refresh").addEventListener("click",load);
   $("#publisher-metrics-sync").addEventListener("click",syncMetrics);
-  $("#publisher-clip").addEventListener("change",()=>{const item=state.eligible.find(x=>x.clipId===$("#publisher-clip").value);if(item){$("#publisher-title").value=item.title||"";$("#publisher-description").value=item.caption||"";}});
+   $("#publisher-clip").addEventListener("change",()=>{const item=state.eligible.find(x=>x.clipId===$("#publisher-clip").value);if(item){$("#publisher-title").value=item.title||"";$("#publisher-description").value=item.caption||"";}renderMetadataPreview();});
   $("#publisher-brand-profile").addEventListener("change",loadBrandTemplateFields);
   $("#publisher-brand-save").addEventListener("click",saveBrandTemplate);
   $("#publisher-brand-apply").addEventListener("click",applyBrandTemplate);
