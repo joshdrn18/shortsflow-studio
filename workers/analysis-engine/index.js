@@ -1017,7 +1017,10 @@ async function handleBackgroundRender(request,env,url){
     AND t.version=(SELECT MAX(t2.version) FROM source_transcripts t2 WHERE t2.source_video_id=t.source_video_id)
    LEFT JOIN workspace_settings ws ON ws.workspace_id=j.workspace_id
    WHERE j.id=? AND j.runner_id=? AND j.status='running'`).bind(claimed.id,runner.runnerId).first();
-  if(!data||!data.source_key){await env.DB.prepare("UPDATE clip_render_jobs SET status='failed',last_error='Private source video is missing.',updated_at=? WHERE id=?").bind(iso,claimed.id).run();return json({ok:false,error:"Source video is missing."},404);}
+  if(!data||!data.source_key){await env.DB.batch([
+   env.DB.prepare("UPDATE clip_render_jobs SET status='failed',last_error='Private source video is missing.',runner_id=NULL,locked_until=NULL,updated_at=? WHERE id=? AND runner_id=?").bind(iso,claimed.id,runner.runnerId),
+   env.DB.prepare("UPDATE clips SET status='editing',updated_at=? WHERE id=? AND workspace_id=? AND status='rendering'").bind(iso,claimed.clip_id,claimed.workspace_id)
+  ]);return json({ok:false,error:"Source video is missing."},404);}
   let words=[];try{words=JSON.parse(data.segments_json||"[]");}catch{}
   words=(Array.isArray(words)?words:[]).filter(w=>w&&typeof w.word==="string"&&Number.isFinite(Number(w.start))&&Number.isFinite(Number(w.end))&&Number(w.end)>Number(data.start_seconds)&&Number(w.start)<Number(data.end_seconds)).slice(0,10000).map(w=>({word:cleanSpeechToken(w.word),start:Math.max(0,Number(w.start)-Number(data.start_seconds)),end:Math.max(0,Number(w.end)-Number(data.start_seconds))}));
   let config={};try{config=JSON.parse(data.subtitle_config_json||"{}");}catch{}
@@ -1058,11 +1061,13 @@ async function handleBackgroundRender(request,env,url){
  }
  if(request.method==="POST"&&route==="/internal/render/fail"){
   const body=await request.json().catch(()=>({})),message=String(body.error||"Background rendering failed.").slice(0,1000),now=new Date().toISOString();
+  const retry=Number(job.attempts||0)<3;
+  const retryAt=retry?new Date(Date.now()+2*60*1000).toISOString():null;
   await env.DB.batch([
-   env.DB.prepare("UPDATE clip_render_jobs SET status='failed',last_error=?,locked_until=NULL,runner_id=NULL,updated_at=? WHERE id=? AND status='running' AND runner_id=?").bind(message,now,job.id,runner.runnerId),
-   env.DB.prepare("UPDATE clips SET status='editing',updated_at=? WHERE id=? AND workspace_id=? AND status='rendering'").bind(now,job.clip_id,job.workspace_id)
+   env.DB.prepare("UPDATE clip_render_jobs SET status=?,last_error=?,locked_until=?,runner_id=NULL,updated_at=? WHERE id=? AND status='running' AND runner_id=?").bind(retry?"queued":"failed",message,retryAt,now,job.id,runner.runnerId),
+   env.DB.prepare("UPDATE clips SET status=?,updated_at=? WHERE id=? AND workspace_id=? AND status='rendering'").bind(retry?"rendering":"editing",now,job.clip_id,job.workspace_id)
   ]);
-  return json({ok:true});
+  return json({ok:true,retryScheduled:retry,attempts:Number(job.attempts||0),maxAttempts:3});
  }
  return json({ok:false,error:"Not found."},404);
 }
