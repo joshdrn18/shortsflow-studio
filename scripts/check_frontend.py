@@ -4,7 +4,7 @@ import json
 import shlex
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = "20261112-ui1"
+BUILD = "20261112-ui2"
 
 class Assets(HTMLParser):
     def __init__(self):
