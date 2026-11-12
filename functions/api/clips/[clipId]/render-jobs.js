@@ -1,16 +1,19 @@
 import { json, getSessionUser } from "../../_lib/auth.js";
 const ID=/^[0-9a-f-]{36}$/i;
-async function wakeRenderRunner(env){
+async function wakeRenderRunner(env,jobId){
  const token=env.GITHUB_ACTIONS_TOKEN||env.GITHUB_DISPATCH_TOKEN;
  if(!token)return false;
  try{
-  const response=await fetch("https://api.github.com/repos/joshdrn18/shortsflow-studio/actions/workflows/background-render.yml/dispatches",{
+  // repository_dispatch uses the repo contents:write permission, and the
+  // workflow explicitly listens for render-queued events.
+  const response=await fetch("https://api.github.com/repos/joshdrn18/shortsflow-studio/dispatches",{
    method:"POST",
    headers:{Authorization:"Bearer "+token,Accept:"application/vnd.github+json","Content-Type":"application/json","X-GitHub-Api-Version":"2022-11-28"},
-   body:JSON.stringify({ref:"main"})
+   body:JSON.stringify({event_type:"render-queued",client_payload:{job_id:String(jobId||"")}})
   });
   if(!response.ok){
-   console.error("background_render_dispatch_failed",{status:response.status});
+   const detail=(await response.text().catch(()=>"")).slice(0,300);
+   console.error("background_render_dispatch_failed",{status:response.status,detail});
    return false;
   }
   return true;
@@ -35,7 +38,7 @@ export async function onRequestPost({request,env,params}){
   if(Number(clip.size_bytes||0)>200*1024*1024)return json({ok:false,error:"Source exceeds the 200 MB background render limit."},413);
   const active=await env.DB.prepare("SELECT * FROM clip_render_jobs WHERE clip_id=? AND metadata_version=? AND status IN ('queued','running') ORDER BY created_at DESC LIMIT 1").bind(clipId,clip.version).first();
   if(active){
-   const runnerWakeRequested=active.status==="queued"?await wakeRenderRunner(env):false;
+   const runnerWakeRequested=active.status==="queued"?await wakeRenderRunner(env,active.id):false;
    return json({ok:true,job:{id:active.id,status:active.status,metadataVersion:Number(active.metadata_version),createdAt:active.created_at},reused:true,runnerWakeRequested},200);
   }
   const now=new Date().toISOString(),jobId=crypto.randomUUID();
@@ -47,7 +50,7 @@ export async function onRequestPost({request,env,params}){
    env.DB.prepare("UPDATE clips SET status='rendering',updated_at=? WHERE id=? AND workspace_id=?").bind(now,clipId,user.workspace.id),
    env.DB.prepare("INSERT INTO activity_logs(id,workspace_id,entity_type,entity_id,event,details,created_at) VALUES(?,?, 'clip',?,'clip_render_queued',?,?)").bind(crypto.randomUUID(),user.workspace.id,clipId,JSON.stringify({jobId,metadataVersion:Number(clip.version),engine:"background-ffmpeg"}),now)
   ]);
-  const runnerWakeRequested=await wakeRenderRunner(env);
+  const runnerWakeRequested=await wakeRenderRunner(env,jobId);
   return json({ok:true,job:{id:jobId,status:"queued",metadataVersion:Number(clip.version),createdAt:now},runnerWakeRequested},202);
  }catch(error){console.error("background_render_enqueue_failed",error);return json({ok:false,error:"Could not queue background render. Please retry."},503);}
 }
