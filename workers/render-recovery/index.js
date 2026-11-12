@@ -17,8 +17,8 @@ async function recover(env) {
       UPDATE clip_render_jobs
       SET status='cancelled', runner_id=NULL, locked_until=NULL,
           last_error='Clip settings changed; this render is obsolete.', updated_at=?
-      WHERE status IN ('queued','failed')
-         OR (status='running' AND (locked_until IS NULL OR locked_until<=?))
+      WHERE (status IN ('queued','failed')
+         OR (status='running' AND (locked_until IS NULL OR locked_until<=?)))
       AND EXISTS (
         SELECT 1 FROM clip_metadata m
         WHERE m.clip_id=clip_render_jobs.clip_id
