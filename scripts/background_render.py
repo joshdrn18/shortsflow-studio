@@ -107,7 +107,7 @@ def make_ass(job, path):
             pieces = []
             for item in group:
                 if item is active:
-                    pieces.append("{\\c" + highlight + "&}\\b1 " + item["word"] + "{\\c" + base + "&}\\b0")
+                    pieces.append("{\c" + highlight + "&}" + item["word"] + "{\c" + base + "&}")
                 else:
                     pieces.append(item["word"])
             text = " ".join(pieces)
