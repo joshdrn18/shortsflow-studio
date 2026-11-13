@@ -6,6 +6,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import textwrap
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -13,8 +14,10 @@ import urllib.request
 WORKER = os.environ.get("SHORTSFLOW_RENDER_WORKER", "https://shortsflow-analysis-engine.inipastiuy-41f.workers.dev").rstrip("/")
 MAX_OUTPUT = 90 * 1024 * 1024
 
-def request(url, method="GET", token=None, data=None, content_type=None, timeout=900):
+def request(url, method="GET", token=None, data=None, content_type=None, timeout=900, extra_headers=None):
     headers = {"User-Agent": "ShortsFlow-Background-Renderer/1.0"}
+    if extra_headers:
+        headers.update(extra_headers)
     if token:
         headers["Authorization"] = "Bearer " + token
     if content_type:
@@ -187,6 +190,161 @@ def process_one_job(worker, token, job):
             print("Could not report render failure: " + str(report_error), file=sys.stderr)
         return False
 
+
+def escape_ass(value):
+    return str(value or "").replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}").replace("\n", " ")
+
+def make_autopilot_ass(job, scene_durations, path):
+    lines = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        "PlayResX: 1080",
+        "PlayResY: 1920",
+        "WrapStyle: 2",
+        "ScaledBorderAndShadow: yes",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        "Style: Default,DejaVu Sans,60,&H00FFFFFF,&H000000FF,&H00101010,&H78000000,1,0,0,0,100,100,0,0,1,4,1,2,72,72,168,1",
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    cursor = 0.0
+    for scene, duration in zip(job.get("scenes") or [], scene_durations):
+        subtitle = escape_ass(scene.get("subtitle") or "")
+        wrapped = textwrap.fill(subtitle, width=30, break_long_words=False, break_on_hyphens=False)
+        wrapped = wrapped.replace("\n", r"\N")
+        start = ass_time(cursor + 0.12)
+        end = ass_time(max(cursor + 0.8, cursor + duration - 0.12))
+        lines.append(f"Dialogue: 0,{start},{end},Default,,0,0,0,,{wrapped}")
+        cursor += duration
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+def probe_media(path):
+    raw = subprocess.check_output([
+        "ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)
+    ], timeout=60)
+    data = json.loads(raw)
+    streams = data.get("streams") or []
+    video = next((stream for stream in streams if stream.get("codec_type") == "video"), None)
+    audio = next((stream for stream in streams if stream.get("codec_type") == "audio"), None)
+    duration = float((data.get("format") or {}).get("duration") or 0)
+    if not video or not audio:
+        raise RuntimeError("Export must contain both a video stream and voice audio.")
+    if int(video.get("width") or 0) != 1080 or int(video.get("height") or 0) != 1920:
+        raise RuntimeError("Export resolution is not 1080x1920.")
+    if duration < 15 or duration > 60:
+        raise RuntimeError("Export duration is outside the 15–60 second Short range.")
+    return duration
+
+def render_autopilot(job, image_paths, audio_path, output, workdir):
+    scenes = job.get("scenes") or []
+    if len(scenes) != 4 or len(image_paths) != 4:
+        raise RuntimeError("Autopilot render requires four generated scene images.")
+    audio_probe = subprocess.check_output([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path)
+    ], timeout=60)
+    total_duration = float(audio_probe.decode("utf-8").strip())
+    if total_duration < 15 or total_duration > 60:
+        raise RuntimeError("Generated voice duration is outside the 15–60 second range.")
+    weights = [max(1, len(str(scene.get("narration") or "").split())) for scene in scenes]
+    weight_total = sum(weights)
+    durations = [total_duration * weight / weight_total for weight in weights]
+    ass = make_autopilot_ass(job, durations, pathlib.Path(workdir) / "autopilot-subtitles.ass")
+    filters = []
+    for index, duration in enumerate(durations):
+        filters.append(
+            f"[{index}:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+            f"crop=1080:1920,zoompan=z='min(max(zoom,pzoom)+0.0005,1.10)':d=1:"
+            f"s=1080x1920:fps=30,trim=duration={duration:.3f},setpts=PTS-STARTPTS[v{index}]"
+        )
+    concat_inputs = "".join(f"[v{i}]" for i in range(4))
+    filters.append(f"{concat_inputs}concat=n=4:v=1:a=0[base]")
+    filters.append(f"[base]subtitles={ass}:fontsdir=/usr/share/fonts/truetype/dejavu[vsub]")
+    watermark = job.get("watermark") or {}
+    current = "vsub"
+    if watermark.get("enabled", True):
+        wm_text = str(watermark.get("text") or "@Clippers2K26")[:40]
+        textfile = pathlib.Path(workdir) / "autopilot-watermark.txt"
+        textfile.write_text(wm_text, encoding="utf-8")
+        scale = {"small": .68, "large": 1.15}.get(watermark.get("scale"), .88)
+        size = round(46 * scale)
+        pos = str(watermark.get("position") or "center")
+        x = "58" if pos.endswith("left") else "(w-text_w)/2" if pos.endswith("center") or pos == "center" else "w-text_w-58"
+        y = "58" if pos.startswith("top") else "(h-text_h)/2" if pos == "center" else "h-text_h-58"
+        opacity = max(.1, min(1, float(watermark.get("opacity", .72))))
+        filters.append(
+            f"[{current}]drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:"
+            f"textfile={textfile}:fontcolor=white@{opacity}:fontsize={size}:"
+            f"shadowcolor=black@0.75:shadowx=2:shadowy=2:x={x}:y={y}[vout]"
+        )
+        current = "vout"
+    command = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y"]
+    for image_path, duration in zip(image_paths, durations):
+        command += ["-loop", "1", "-framerate", "30", "-t", f"{duration:.3f}", "-i", str(image_path)]
+    command += ["-i", str(audio_path), "-filter_complex", ";".join(filters),
+                "-map", f"[{current}]", "-map", "4:a:0", "-t", f"{total_duration:.3f}",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                "-maxrate", "3.8M", "-bufsize", "7.6M", "-pix_fmt", "yuv420p", "-r", "30",
+                "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)]
+    print("Rendering original AI Short with four scenes, translated subtitles and brand watermark.", flush=True)
+    subprocess.run(command, check=True, timeout=1800)
+    size = output.stat().st_size
+    if size < 1024 or size > 45 * 1024 * 1024:
+        raise RuntimeError(f"Autopilot MP4 is invalid or exceeds 45 MB ({size} bytes).")
+    duration = probe_media(output)
+    return size, duration
+
+def process_one_autopilot(worker, token, job):
+    job_id = job["id"]
+    print(f"Claimed original-content autopilot job {job_id}: {job.get('title')}", flush=True)
+    try:
+        with tempfile.TemporaryDirectory(prefix="shortsflow-autopilot-") as temp:
+            root = pathlib.Path(temp)
+            audio_path = root / "voice.mp3"
+            output = root / "autopilot-short.mp4"
+            _, _, audio = request(
+                worker + "asset?" + urllib.parse.urlencode({"jobId": job_id, "kind": "audio"}),
+                token=token, timeout=180
+            )
+            audio_path.write_bytes(audio)
+            if not audio_path.stat().st_size:
+                raise RuntimeError("Voice download returned an empty audio file.")
+            image_paths = []
+            for scene in job.get("scenes") or []:
+                image_path = root / f"scene-{int(scene['scene'])}.jpg"
+                _, _, image = request(
+                    worker + "asset?" + urllib.parse.urlencode({"jobId": job_id, "kind": "image", "scene": scene["scene"]}),
+                    token=token, timeout=180
+                )
+                image_path.write_bytes(image)
+                if not image_path.stat().st_size:
+                    raise RuntimeError(f"Scene {scene['scene']} image download was empty.")
+                image_paths.append(image_path)
+            size, duration = render_autopilot(job, image_paths, audio_path, output, temp)
+            request(
+                worker + "complete?" + urllib.parse.urlencode({"jobId": job_id}),
+                method="POST", token=token, data=output.read_bytes(), content_type="video/mp4",
+                extra_headers={"X-Video-Duration": f"{duration:.3f}"}, timeout=900
+            )
+            print(f"Autopilot MP4 verified and queued for YouTube upload ({size} bytes, {duration:.1f}s).", flush=True)
+            return True
+    except Exception as error:
+        message = str(error)[:900]
+        print("Autopilot render failed: " + message, file=sys.stderr, flush=True)
+        try:
+            request(
+                worker + "fail?" + urllib.parse.urlencode({"jobId": job_id}),
+                method="POST", token=token, data=json.dumps({"error": message}).encode(),
+                content_type="application/json", timeout=30
+            )
+        except Exception as report_error:
+            print("Could not report autopilot render failure: " + str(report_error), file=sys.stderr)
+        return False
+
 def main():
     token = oidc_token()
     worker = WORKER + "/internal/render/"
@@ -206,6 +364,21 @@ def main():
             failed += 1
     else:
         print(f"Reached per-run limit ({max_jobs}). Processed {completed} render(s), {failed} failed; remaining jobs will be picked up by the next runner.", flush=True)
+
+    autopilot_worker = WORKER + "/internal/autopilot/"
+    auto_completed = 0
+    auto_failed = 0
+    for index in range(1):
+        _, _, response = request(autopilot_worker + "claim", method="POST", token=token, data=b"{}", content_type="application/json")
+        auto_job = json.loads(response).get("job")
+        if not auto_job:
+            print("No original-content autopilot render is ready.", flush=True)
+            break
+        if process_one_autopilot(autopilot_worker, token, auto_job):
+            auto_completed += 1
+        else:
+            auto_failed += 1
+    print(f"Autopilot runner result: {auto_completed} completed, {auto_failed} failed.", flush=True)
 
 if __name__ == "__main__":
     main()
