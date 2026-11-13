@@ -752,7 +752,7 @@ async function processAutopilot(env) {
       }
       const flux=await env.AI.run("@cf/black-forest-labs/flux-1-schnell",{
         prompt:textSafe(next.visual_prompt,1800)+" — vertical 9:16 original documentary illustration, cinematic natural lighting, no text, no logos, no watermark.",
-        steps:4,seed:Math.floor(Math.random()*2147483647)
+        steps:4
       });
       if(!flux?.image)throw new Error("Image model returned no generated image.");
       const binary=Uint8Array.from(atob(flux.image),char=>char.charCodeAt(0));
