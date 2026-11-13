@@ -464,13 +464,14 @@ async function translateAutopilotSubtitles(env,job,scenes) {
   const rows=Array.isArray(translated?.translations)?translated.translations:[];
   const byScene=new Map(rows.map((row,index)=>[
     Number(row.scene)||index+1,
-    textSafe(row.text||row.translation||row.subtitle||row.subtitle_text,350)
+    textSafe(row.text||row.translation||row.subtitle||row.subtitle_text||row.indonesian,350)
   ]));
   return scenes.map((scene,index)=>{
-    const value=byScene.get(Number(scene.scene))||textSafe(rows[index]?.text||rows[index]?.translation||rows[index]?.subtitle||rows[index]?.subtitle_text,350);
+    const value=byScene.get(Number(scene.scene))||textSafe(rows[index]?.text||rows[index]?.translation||rows[index]?.subtitle||rows[index]?.subtitle_text||rows[index]?.indonesian,350);
     const words=value.split(/\s+/).filter(Boolean);
-    if(value.length<8||words.length<2||words.length>40||/_/.test(value)||/^[a-z0-9_-]+$/i.test(value)) {
-      throw new Error("Subtitle translation QA failed for scene "+scene.scene+". A readable Indonesian phrase was not returned.");
+    const looksLikeIdentifier=value.includes("_")||/^(?:scene|subtitle|segment)[-_]?\d+$/i.test(value)||/^\d+$/.test(value);
+    if(value.length<4||words.length>40||looksLikeIdentifier) {
+      throw new Error("Subtitle translation QA failed for scene "+scene.scene+". A readable Indonesian phrase was not returned ("+JSON.stringify(value.slice(0,60))+").");
     }
     return {...scene,subtitle_indonesian:value};
   });
