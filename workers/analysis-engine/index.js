@@ -502,10 +502,10 @@ async function discoverAutopilotSources() {
 async function normalizeAutopilotNarration(env,job,script,source) {
   let narration=textSafe(script.narration,4000);
   let count=narration.split(/\s+/).filter(Boolean).length;
-  if(count<86) {
+  if(count<86||count>120) {
     const article=textSafe(source?.article_excerpt||"",3600);
     const system=[
-      "You are a documentary script editor. Expand an under-length English narration into a complete 40–50 second YouTube Short.",
+      "You are a documentary script editor. Rewrite an English narration that is too short or too long into a complete 40–50 second YouTube Short.",
       "Return 90–105 spoken English words, not including the title or scene labels.",
       "Use only factual information supported by the article excerpt. Never add facts, dates, statistics, causes, quotes, identities, or outcomes that are not explicitly supported.",
       "Build a clear opening, explanation, development, and payoff. Keep sentences short and natural to speak.",
@@ -665,26 +665,27 @@ async function generateAutopilotScript(env,job,bucket) {
   if(!sourceForNarration||sourceForNarration.evidence_level!=="publisher_article"||String(sourceForNarration.article_excerpt||"").length<700)throw new Error("Research QA failed: full publisher article text was not available.");
   script.narration=await normalizeAutopilotNarration(env,job,script,sourceForNarration);
   const selectedIds=new Set(sourceNotes.map(note=>note.source_id));
-  let sceneDrafts=Array.isArray(script.scenes)?script.scenes.slice(0,4):[];
-  const draftWordCount=sceneDrafts.reduce((total,scene)=>total+String(scene?.narration||"").split(/\s+/).filter(Boolean).length,0);
-  if(sceneDrafts.length<4||draftWordCount<75) {
-    const narrationParts=splitAutopilotNarration(script.narration);
-    const firstDraft=sceneDrafts[0]||{};
-    const baseVisual=textSafe(firstDraft.visual_prompt,1300)||("Original cinematic documentary visuals illustrating "+textSafe(script.topic,180)+" using only the supplied source article context.");
-    const shotDirections=[
-      "Opening establishing wide shot, clear visual setting and strongest story subject.",
-      "Medium documentary shot focusing on the main development described in this narration segment.",
-      "Close-up or detailed process shot illustrating this narration segment without adding factual details.",
-      "Final cinematic wide shot that visually resolves the same story and supports the factual takeaway."
-    ];
-    const existingDrafts=sceneDrafts.slice();
-    sceneDrafts=narrationParts.map((part,index)=>({
-      scene:index+1,narration:part,
-      visual_prompt:textSafe(existingDrafts[index]?.visual_prompt,1300)||baseVisual+" Shot direction: "+shotDirections[index]+" Keep the exact same subject, setting and factual context; do not introduce additional people, objects, numbers or events.",
-      on_screen_text:textSafe(existingDrafts[index]?.on_screen_text,60)||part.split(/\s+/).slice(0,5).join(" "),
-      source_ids:Array.isArray(existingDrafts[index]?.source_ids)?existingDrafts[index].source_ids:[...selectedIds]
-    }));
-  }
+  const originalDrafts=Array.isArray(script.scenes)?script.scenes.slice(0,4):[];
+  const narrationParts=splitAutopilotNarration(script.narration);
+  const firstVisual=textSafe(originalDrafts.find(scene=>textSafe(scene?.visual_prompt,1800))?.visual_prompt,1300)||
+    ("Original cinematic documentary visuals illustrating "+textSafe(script.topic,180)+" using only the supplied publisher article context.");
+  const shotDirections=[
+    "Opening establishing wide shot, clear visual setting and strongest story subject.",
+    "Medium documentary shot showing the main development described in this segment.",
+    "Close-up documentary detail illustrating this segment without adding facts.",
+    "Final cinematic wide shot supporting the factual takeaway."
+  ];
+  const sceneDrafts=narrationParts.map((part,index)=>{
+    const draft=originalDrafts[index]||{};
+    const specificVisual=textSafe(draft.visual_prompt,1300);
+    return {
+      scene:index+1,
+      narration:part,
+      visual_prompt:(specificVisual||firstVisual)+" Shot direction: "+shotDirections[index]+" Stay faithful to the selected publisher article; do not invent additional people, objects, events, numbers, or settings.",
+      on_screen_text:textSafe(draft.on_screen_text,60)||part.split(/\s+/).slice(0,5).join(" "),
+      source_ids:Array.isArray(draft.source_ids)?draft.source_ids:[...selectedIds]
+    };
+  });
   const scenes=sceneDrafts.slice(0,4).map((scene,index)=>{
     const sourceIds=(Array.isArray(scene.source_ids)?scene.source_ids.map(Number).filter(id=>selectedIds.has(id)):[]);
     if(!sourceIds.length)sourceIds.push(...selectedIds);
