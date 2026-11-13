@@ -578,12 +578,13 @@ async function generateAutopilotScript(env,job,bucket) {
   const previous=await env.DB.prepare("SELECT title,topic FROM autopilot_jobs WHERE workspace_id=? AND created_at>? ORDER BY created_at DESC LIMIT 20")
     .bind(job.workspace_id,new Date(Date.now()-30*86400000).toISOString()).all();
   const avoid=(previous.results||[]).map(item=>item.title+" — "+item.topic).join("\n");
-  const sourceBrief=sources.map((item,index)=>
+  const selectedResearch=sources.slice(0,3);
+  const sourceBrief=selectedResearch.map((item,index)=>
     "["+(index+1)+"] TITLE: "+item.title+
     " | PUBLISHER: "+item.source+
     " | PUBLISHED: "+item.published+
     " | EVIDENCE LEVEL: "+item.evidence_level+
-    " | ARTICLE EXCERPT: "+item.article_excerpt+
+    " | ARTICLE TEXT: "+textSafe(item.article_excerpt,2200)+
     " | URL: "+item.article_url
   ).join("\n\n");
   const system=[
@@ -602,14 +603,27 @@ async function generateAutopilotScript(env,job,bucket) {
   const prompt="CURRENT PUBLISHER ARTICLE EVIDENCE:\n"+sourceBrief+
     "\n\nRECENT CHANNEL TOPICS TO AVOID REPEATING:\n"+(avoid||"None.")+
     "\n\nCreate one original Short. Voice: English. Subtitles will be separately translated to Bahasa Indonesia. Target length: about 45 seconds. Return compact valid JSON only.";
-  if(!await reserveTextBudget(env,"autopilot-script:"+job.id,Math.ceil((system.length+prompt.length)/3),1500)) {
+  if(!await reserveTextBudget(env,"autopilot-script:"+job.id,Math.ceil((system.length+prompt.length)/3),2000)) {
     throw new Error("Daily Workers AI safety budget reached.");
   }
-  const inference=await env.AI.run(CLIP_MODEL,{
+  let inference=await env.AI.run(CLIP_MODEL,{
     messages:[{role:"system",content:system},{role:"user",content:prompt}],
-    max_tokens:1800,temperature:0.15,response_format:{type:"json_object"}
+    max_tokens:2400,temperature:0.15,response_format:{type:"json_object"}
   });
-  const script=parseAutopilotScript(inference);
+  let script;
+  try {
+    script=parseAutopilotScript(inference);
+  } catch(error) {
+    const retryPrompt=prompt+"\n\nFORMAT REPAIR: Your previous response was not a complete valid JSON object. Regenerate from the source evidence above. Return exactly one complete JSON object with 4 scenes, a 90–105 word narration, and no prose outside the JSON.";
+    if(!await reserveTextBudget(env,"autopilot-script-repair:"+job.id,Math.ceil((system.length+retryPrompt.length)/3),1800)) {
+      throw new Error("Daily Workers AI safety budget reached before script-format retry.");
+    }
+    inference=await env.AI.run(CLIP_MODEL,{
+      messages:[{role:"system",content:system},{role:"user",content:retryPrompt}],
+      max_tokens:2400,temperature:0.1,response_format:{type:"json_object"}
+    });
+    script=parseAutopilotScript(inference);
+  }
   if(script.skip)throw new Error(String(script.skip_reason||"Article evidence was not strong enough."));
   if(!script.title||!script.topic||!script.narration) {
     const keys=script&&typeof script==="object"?Object.keys(script).slice(0,16).join(","):"not-an-object";
