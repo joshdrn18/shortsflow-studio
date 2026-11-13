@@ -425,6 +425,49 @@ async function discoverAutopilotSources() {
   return [...unique.values()].sort((a,b)=>Date.parse(b.published)-Date.parse(a.published)).slice(0,12);
 }
 
+
+async function normalizeAutopilotNarration(env,job,script,source) {
+  let narration=textSafe(script.narration,4000);
+  let count=narration.split(/\s+/).filter(Boolean).length;
+  if(count<86) {
+    const article=textSafe(source?.article_excerpt||"",3600);
+    const system=[
+      "You are a documentary script editor. Expand an under-length English narration into a complete 40–50 second YouTube Short.",
+      "Return 90–105 spoken English words, not including the title or scene labels.",
+      "Use only factual information supported by the article excerpt. Never add facts, dates, statistics, causes, quotes, identities, or outcomes that are not explicitly supported.",
+      "Build a clear opening, explanation, development, and payoff. Keep sentences short and natural to speak.",
+      "Do not add stage directions, timestamps, headings, scene names, or hashtags to the narration.",
+      "Return one JSON object with title, topic, narration, and exactly four scenes. Each scene needs scene number, narration segment copied from the full narration, visual_prompt, on_screen_text, and source_ids [1].",
+      "The four scene narration segments, in order, must cover the complete narration without omissions or invented sentences.",
+      "If the article cannot support 90–105 factual spoken words, return {\"skip\":true,\"skip_reason\":\"article does not contain enough supported detail\"}."
+    ].join(" ");
+    const prompt="CURRENT TITLE: "+textSafe(script.title,100)+
+      "\nCURRENT TOPIC: "+textSafe(script.topic,180)+
+      "\nCURRENT SHORT NARRATION (too short; rewrite/expand): "+narration+
+      "\nVERIFIED ARTICLE EXCERPT:\n"+article+
+      "\nReturn compact valid JSON only, with narration between 90 and 105 words.";
+    if(!await reserveTextBudget(env,"autopilot-narration-repair:"+job.id,Math.ceil((system.length+prompt.length)/3),950)) {
+      throw new Error("Daily Workers AI safety budget reached before narration repair.");
+    }
+    const inference=await env.AI.run(CLIP_MODEL,{
+      messages:[{role:"system",content:system},{role:"user",content:prompt}],
+      max_tokens:1250,temperature:0.1,response_format:{type:"json_object"}
+    });
+    const repaired=parseAutopilotJson(inference);
+    if(repaired.skip)throw new Error(String(repaired.skip_reason||"Article evidence cannot support a complete Short."));
+    const repairedNarration=textSafe(repaired.narration,4000);
+    const repairedCount=repairedNarration.split(/\s+/).filter(Boolean).length;
+    if(repairedCount<86||repairedCount>120) {
+      throw new Error("Narration repair QA failed: expected 86–120 supported spoken words, received "+repairedCount+".");
+    }
+    script.narration=repairedNarration;
+    if(Array.isArray(repaired.scenes)&&repaired.scenes.length>=4)script.scenes=repaired.scenes;
+    count=repairedCount;
+  }
+  if(count<80||count>125)throw new Error("Narration length QA failed: expected 80–125 spoken words, received "+count+".");
+  return narration===script.narration?narration:script.narration;
+}
+
 function splitAutopilotNarration(value) {
   const words=String(value||"").trim().split(/\s+/).filter(Boolean);
   if(words.length<36)throw new Error("Narration is too short for four coherent scenes.");
@@ -493,12 +536,12 @@ async function generateAutopilotScript(env,job,bucket) {
   ).join("\n\n");
   const system=[
     "You are the editorial producer for a professional original YouTube Shorts channel.",
-    "Create one compelling 40–50 second mini-documentary from a single specific current story with strong audience interest and a clear factual payoff. Optimize for curiosity, retention and shareability; never promise virality or invent popularity signals.",
+    "Create one compelling 40–50 second mini-documentary from a single specific current story with strong audience interest and a clear factual payoff. The complete spoken English narration MUST contain 90–105 words. Optimize for curiosity, retention and shareability; never promise virality or invent popularity signals.",
     "The supplied material includes actual publisher article text excerpts, not just headlines. Use only facts explicitly supported by those excerpts. Do not invent statistics, quotations, dates, results, causes, locations, identities, or context. If the excerpts do not support a coherent story, return {\"skip\":true,\"skip_reason\":\"article evidence is insufficient\"}.",
     "Choose exactly one supplied publisher article as the source for this Short. Do not combine unrelated stories or claim facts beyond that article excerpt.",
     "Every factual scene must be traceable to one or more supplied source IDs. The source_notes array must contain objects with numeric source_id and a short used_for description. Each scene must include source_ids as an array of those same numeric IDs.",
     "Narration is English, natural to speak and suitable for a global audience. Do not return translations in this script; subtitles are generated separately by a dedicated translator.",
-    "Use exactly four scenes. Each scene needs a concrete factual narration, an original cinematic visual prompt, and brief on_screen_text of at most 6 words.",
+    "Use exactly four scenes. The four scene narration segments together MUST cover the complete 90–105-word narration. Each scene needs a concrete factual narration, an original cinematic visual prompt, and brief on_screen_text of at most 6 words.",
     "Visuals must be original AI-generated illustrative scenes only. Do not recreate third-party footage, named creators, celebrities, logos, broadcast clips, or recognizable fictional characters. No text, captions, logos, or watermarks inside generated images.",
     "Use a specific non-generic title and first-two-second hook, a satisfying factual payoff, and a concise caption. Avoid generic clickbait, false urgency, and unsupported superlatives.",
     "Return only compact valid JSON in this exact shape:",
@@ -526,9 +569,12 @@ async function generateAutopilotScript(env,job,bucket) {
     .slice(0,1)
     .map(note=>({source_id:Number(note.source_id),used_for:textSafe(note.used_for,220)}));
   if(!sourceNotes.length)throw new Error("Research QA failed: the script did not cite a valid publisher article.");
+  const sourceForNarration=sources[sourceNotes[0].source_id-1];
+  script.narration=await normalizeAutopilotNarration(env,job,script,sourceForNarration);
   const selectedIds=new Set(sourceNotes.map(note=>note.source_id));
   let sceneDrafts=Array.isArray(script.scenes)?script.scenes.slice(0,4):[];
-  if(sceneDrafts.length<4) {
+  const draftWordCount=sceneDrafts.reduce((total,scene)=>total+String(scene?.narration||"").split(/\\s+/).filter(Boolean).length,0);
+  if(sceneDrafts.length<4||draftWordCount<75) {
     const narrationParts=splitAutopilotNarration(script.narration);
     const firstDraft=sceneDrafts[0]||{};
     const baseVisual=textSafe(firstDraft.visual_prompt,1300)||("Original cinematic documentary visuals illustrating "+textSafe(script.topic,180)+" using only the supplied source article context.");
@@ -538,11 +584,12 @@ async function generateAutopilotScript(env,job,bucket) {
       "Close-up or detailed process shot illustrating this narration segment without adding factual details.",
       "Final cinematic wide shot that visually resolves the same story and supports the factual takeaway."
     ];
+    const existingDrafts=sceneDrafts.slice();
     sceneDrafts=narrationParts.map((part,index)=>({
       scene:index+1,narration:part,
-      visual_prompt:baseVisual+" Shot direction: "+shotDirections[index]+" Keep the exact same subject, setting and factual context; do not introduce additional people, objects, numbers or events.",
-      on_screen_text:part.split(/\s+/).slice(0,5).join(" "),
-      source_ids:[...selectedIds]
+      visual_prompt:textSafe(existingDrafts[index]?.visual_prompt,1300)||baseVisual+" Shot direction: "+shotDirections[index]+" Keep the exact same subject, setting and factual context; do not introduce additional people, objects, numbers or events.",
+      on_screen_text:textSafe(existingDrafts[index]?.on_screen_text,60)||part.split(/\s+/).slice(0,5).join(" "),
+      source_ids:Array.isArray(existingDrafts[index]?.source_ids)?existingDrafts[index].source_ids:[...selectedIds]
     }));
   }
   const scenes=sceneDrafts.slice(0,4).map((scene,index)=>{
@@ -561,7 +608,8 @@ async function generateAutopilotScript(env,job,bucket) {
     throw new Error("Research QA failed: a scene is missing its source reference, narration, or visual direction.");
   }
   const narration=scenes.map(scene=>scene.narration).join(" ");
-  if(narration.length<220||narration.length>1900)throw new Error("Narration length is outside the safe 40–50 second range.");
+  const spokenWordCount=narration.split(/\\s+/).filter(Boolean).length;
+  if(spokenWordCount<80||spokenWordCount>125||narration.length>1900)throw new Error("Narration length QA failed: expected 80–125 spoken words, received "+spokenWordCount+".");
   const selectedSources=sources.filter((source,index)=>selectedIds.has(index+1));
   const sourceCorpus=selectedSources.map(source=>source.title+" "+source.article_excerpt).join(" ").toLowerCase();
   const numericClaims=narration.match(/\b\d[\d,]*(?:\.\d+)?\b/g)||[];
