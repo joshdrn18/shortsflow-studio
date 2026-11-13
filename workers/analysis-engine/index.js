@@ -441,6 +441,38 @@ function splitAutopilotNarration(value) {
   return chunks;
 }
 
+
+async function translateAutopilotSubtitles(env,job,scenes) {
+  const input=scenes.map(scene=>({scene:scene.scene,english:scene.narration}));
+  const system=[
+    "You are a professional English-to-Indonesian subtitle translator.",
+    "Translate each full English spoken line into natural, fluent Bahasa Indonesia.",
+    "Return a complete sentence or natural spoken phrase, not a label, topic, slug, keyword, filename, or identifier.",
+    "Never return underscores, IDs, or shortened names in place of a translation. Preserve the meaning, facts, numbers, proper names, and tone.",
+    "Keep each translation concise enough for a 40–50 second vertical video. Do not add new facts.",
+    "Return only JSON in this exact shape: {\"translations\":[{\"scene\":1,\"text\":\"Kalimat terjemahan Bahasa Indonesia yang lengkap.\"}]}"
+  ].join(" ");
+  const prompt="Translate the following narration lines into Bahasa Indonesia. Return exactly one translation for each scene and preserve the scene numbers:\n"+JSON.stringify(input);
+  if(!await reserveTextBudget(env,"autopilot-translation:"+job.id,Math.ceil((system.length+prompt.length)/3),700)) {
+    throw new Error("Daily Workers AI safety budget reached before subtitle translation.");
+  }
+  const inference=await env.AI.run(CLIP_MODEL,{
+    messages:[{role:"system",content:system},{role:"user",content:prompt}],
+    max_tokens:850,temperature:0.1,response_format:{type:"json_object"}
+  });
+  const translated=parseAutopilotJson(inference);
+  const rows=Array.isArray(translated?.translations)?translated.translations:[];
+  const byScene=new Map(rows.map(row=>[Number(row.scene),textSafe(row.text,350)]));
+  return scenes.map(scene=>{
+    const value=byScene.get(Number(scene.scene))||"";
+    const words=value.split(/\s+/).filter(Boolean);
+    if(value.length<24||words.length<5||words.length>28||/_/.test(value)||/^[a-z0-9_-]+$/i.test(value)) {
+      throw new Error("Subtitle translation QA failed for scene "+scene.scene+". A full Indonesian sentence was not returned.");
+    }
+    return {...scene,subtitle_indonesian:value};
+  });
+}
+
 async function generateAutopilotScript(env,job,bucket) {
   const sources=await discoverAutopilotSources();
   if(sources.length<1)throw new Error("No recent publisher RSS article with a substantive excerpt could be verified. This slot was skipped.");
