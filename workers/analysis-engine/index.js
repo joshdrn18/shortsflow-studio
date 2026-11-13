@@ -381,6 +381,37 @@ function localDayKey(timeZone,date=new Date()) {
   return values.year+"-"+values.month+"-"+values.day;
 }
 
+
+function extractPublisherArticleText(html) {
+  let content=String(html||"");
+  const articleMatch=content.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i);
+  if(articleMatch)content=articleMatch[0];
+  content=content
+    .replace(/<(script|style|svg|nav|footer|header|aside)\b[^>]*>[\s\S]*?<\/\1>/gi," ")
+    .replace(/<!--[\s\S]*?-->/g," ");
+  const paragraphs=[...content.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
+    .map(match=>autoDecodeXml(match[1]))
+    .map(text=>text.replace(/\s+/g," ").trim())
+    .filter(text=>text.length>=55);
+  const body=paragraphs.join(" ");
+  return body.replace(/\s+/g," ").trim().slice(0,6500);
+}
+function validateAutopilotNarrationAnchors(narration,sourceText) {
+  const stop=new Set(["about","after","again","against","also","among","because","before","being","between","could","during","each","even","every","from","have","into","just","more","most","much","must","next","only","other","over","same","should","some","such","than","that","their","them","there","these","they","this","those","through","under","very","were","what","when","where","which","while","with","would","your","world"]);
+  const corpus=new Set((String(sourceText||"").toLowerCase().match(/[a-z][a-z0-9'-]{2,}/g)||[]));
+  const sentences=String(narration||"").split(/(?<=[.!?])\s+/).map(x=>x.trim()).filter(Boolean);
+  const unanchored=[];
+  for(const sentence of sentences) {
+    const terms=(sentence.toLowerCase().match(/[a-z][a-z0-9'-]{2,}/g)||[])
+      .filter(term=>term.length>=4&&!stop.has(term));
+    const anchors=terms.filter(term=>corpus.has(term));
+    if(!anchors.length)unanchored.push(sentence.slice(0,140));
+  }
+  if(unanchored.length) {
+    throw new Error("Research QA rejected unsupported standalone narration claims: "+unanchored.slice(0,3).join(" | "));
+  }
+}
+
 async function discoverAutopilotSources() {
   const feeds=[
     {url:"https://techcrunch.com/feed/",name:"TechCrunch",niche:"Technology"},
@@ -423,7 +454,27 @@ async function discoverAutopilotSources() {
     const key=item.title.toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
     if(key&&!unique.has(key))unique.set(key,item);
   }
-  return [...unique.values()].sort((a,b)=>Date.parse(b.published)-Date.parse(a.published)).slice(0,12);
+  const candidates=[...unique.values()].sort((a,b)=>Date.parse(b.published)-Date.parse(a.published)).slice(0,8);
+  const enriched=await Promise.all(candidates.map(async item=>{
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),6000);
+    try {
+      const response=await fetch(item.article_url,{signal:controller.signal,headers:{
+        "user-agent":"Mozilla/5.0 (compatible; ShortsFlowResearch/1.0)",
+        "accept":"text/html,application/xhtml+xml;q=0.9,*/*;q=0.8"
+      }});
+      if(!response.ok)return {...item,evidence_level:"publisher_rss_excerpt"};
+      const html=await response.text();
+      const articleText=extractPublisherArticleText(html);
+      if(articleText.length<700)return {...item,evidence_level:"publisher_rss_excerpt"};
+      return {...item,article_excerpt:articleText,evidence_level:"publisher_article"};
+    } catch(error) {
+      console.warn("autopilot_article_unavailable",item.source,String(error?.message||error).slice(0,160));
+      return {...item,evidence_level:"publisher_rss_excerpt"};
+    } finally {
+      clearTimeout(timer);
+    }
+  }));
+  return enriched.filter(item=>item.evidence_level==="publisher_article"&&item.article_excerpt.length>=700).slice(0,8);
 }
 
 
@@ -571,6 +622,7 @@ async function generateAutopilotScript(env,job,bucket) {
     .map(note=>({source_id:Number(note.source_id),used_for:textSafe(note.used_for,220)}));
   if(!sourceNotes.length)throw new Error("Research QA failed: the script did not cite a valid publisher article.");
   const sourceForNarration=sources[sourceNotes[0].source_id-1];
+  if(!sourceForNarration||sourceForNarration.evidence_level!=="publisher_article"||String(sourceForNarration.article_excerpt||"").length<700)throw new Error("Research QA failed: full publisher article text was not available.");
   script.narration=await normalizeAutopilotNarration(env,job,script,sourceForNarration);
   const selectedIds=new Set(sourceNotes.map(note=>note.source_id));
   let sceneDrafts=Array.isArray(script.scenes)?script.scenes.slice(0,4):[];
@@ -613,6 +665,7 @@ async function generateAutopilotScript(env,job,bucket) {
   if(spokenWordCount<80||spokenWordCount>125||narration.length>1900)throw new Error("Narration length QA failed: expected 80–125 spoken words, received "+spokenWordCount+".");
   const selectedSources=sources.filter((source,index)=>selectedIds.has(index+1));
   const sourceCorpus=selectedSources.map(source=>source.title+" "+source.article_excerpt).join(" ").toLowerCase();
+  validateAutopilotNarrationAnchors(narration,sourceCorpus);
   const numericClaims=narration.match(/\b\d[\d,]*(?:\.\d+)?\b/g)||[];
   for(const claim of numericClaims) {
     const normalized=claim.replace(/,/g,"");
