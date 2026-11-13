@@ -323,7 +323,10 @@ async function ensureTranscript(env, job, payload) {
 
 
 function autoDecodeXml(value) {
-  return String(value || "").replace(/<[^>]*>/g," ").replace(/&amp;/g,"&").replace(/&quot;/g,'"')
+  return String(value || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi," ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi," ")
+    .replace(/<[^>]*>/g," ").replace(/&amp;/g,"&").replace(/&quot;/g,'"')
     .replace(/&#39;/g,"'").replace(/&apos;/g,"'").replace(/&lt;/g,"<").replace(/&gt;/g,">")
     .replace(/&nbsp;/gi," ").replace(/&rsquo;/gi,"'").replace(/&lsquo;/gi,"'")
     .replace(/&rdquo;/gi,'"').replace(/&ldquo;/gi,'"').replace(/&mdash;/gi,"—").replace(/&ndash;/gi,"–")
@@ -450,6 +453,7 @@ async function generateAutopilotScript(env,job,bucket) {
   const allowedIds=new Set(sources.map((source,index)=>index+1));
   const sourceNotes=(Array.isArray(script.source_notes)?script.source_notes:[])
     .filter(note=>Number.isInteger(Number(note.source_id))&&allowedIds.has(Number(note.source_id)))
+    .slice(0,1)
     .map(note=>({source_id:Number(note.source_id),used_for:textSafe(note.used_for,220)}));
   if(!sourceNotes.length)throw new Error("Research QA failed: the script did not cite a valid publisher article.");
   const selectedIds=new Set(sourceNotes.map(note=>note.source_id));
