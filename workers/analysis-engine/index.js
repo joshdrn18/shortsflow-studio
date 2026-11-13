@@ -421,6 +421,22 @@ async function discoverAutopilotSources() {
   return [...unique.values()].sort((a,b)=>Date.parse(b.published)-Date.parse(a.published)).slice(0,12);
 }
 
+function splitAutopilotNarration(value) {
+  const words=String(value||"").trim().split(/\s+/).filter(Boolean);
+  if(words.length<36)throw new Error("Narration is too short for four coherent scenes.");
+  const chunks=[];
+  let offset=0;
+  for(let index=0;index<4;index++) {
+    const remaining=words.length-offset;
+    const slots=4-index;
+    const take=Math.ceil(remaining/slots);
+    const end=Math.min(words.length,offset+take);
+    chunks.push(words.slice(offset,end).join(" "));
+    offset=end;
+  }
+  return chunks;
+}
+
 async function generateAutopilotScript(env,job,bucket) {
   const sources=await discoverAutopilotSources();
   if(sources.length<1)throw new Error("No recent publisher RSS article with a substantive excerpt could be verified. This slot was skipped.");
@@ -460,10 +476,9 @@ async function generateAutopilotScript(env,job,bucket) {
   });
   const script=parseAutopilotScript(inference);
   if(script.skip)throw new Error(String(script.skip_reason||"Article evidence was not strong enough."));
-  if(!script.title||!script.topic||!script.narration||!Array.isArray(script.scenes)||script.scenes.length<4) {
+  if(!script.title||!script.topic||!script.narration) {
     const keys=script&&typeof script==="object"?Object.keys(script).slice(0,16).join(","):"not-an-object";
-    const sceneCount=Array.isArray(script?.scenes)?script.scenes.length:0;
-    throw new Error("Generated Short script is incomplete (fields: "+keys+"; scenes: "+sceneCount+").");
+    throw new Error("Generated Short script is missing title, topic, or narration (fields: "+keys+").");
   }
   const allowedIds=new Set(sources.map((source,index)=>index+1));
   const sourceNotes=(Array.isArray(script.source_notes)?script.source_notes:[])
@@ -472,8 +487,27 @@ async function generateAutopilotScript(env,job,bucket) {
     .map(note=>({source_id:Number(note.source_id),used_for:textSafe(note.used_for,220)}));
   if(!sourceNotes.length)throw new Error("Research QA failed: the script did not cite a valid publisher article.");
   const selectedIds=new Set(sourceNotes.map(note=>note.source_id));
-  const scenes=script.scenes.slice(0,4).map((scene,index)=>{
-    const sourceIds=Array.isArray(scene.source_ids)?scene.source_ids.map(Number).filter(id=>selectedIds.has(id)):[...selectedIds];
+  let sceneDrafts=Array.isArray(script.scenes)?script.scenes.slice(0,4):[];
+  if(sceneDrafts.length<4) {
+    const narrationParts=splitAutopilotNarration(script.narration);
+    const firstDraft=sceneDrafts[0]||{};
+    const baseVisual=textSafe(firstDraft.visual_prompt,1300)||("Original cinematic documentary visuals illustrating "+textSafe(script.topic,180)+" using only the supplied source article context.");
+    const shotDirections=[
+      "Opening establishing wide shot, clear visual setting and strongest story subject.",
+      "Medium documentary shot focusing on the main development described in this narration segment.",
+      "Close-up or detailed process shot illustrating this narration segment without adding factual details.",
+      "Final cinematic wide shot that visually resolves the same story and supports the factual takeaway."
+    ];
+    sceneDrafts=narrationParts.map((part,index)=>({
+      scene:index+1,narration:part,
+      visual_prompt:baseVisual+" Shot direction: "+shotDirections[index]+" Keep the exact same subject, setting and factual context; do not introduce additional people, objects, numbers or events.",
+      on_screen_text:part.split(/\\s+/).slice(0,5).join(" "),
+      source_ids:[...selectedIds]
+    }));
+  }
+  const scenes=sceneDrafts.slice(0,4).map((scene,index)=>{
+    const sourceIds=(Array.isArray(scene.source_ids)?scene.source_ids.map(Number).filter(id=>selectedIds.has(id)):[]);
+    if(!sourceIds.length)sourceIds.push(...selectedIds);
     return {
       scene:index+1,
       narration:textSafe(scene.narration,500),
