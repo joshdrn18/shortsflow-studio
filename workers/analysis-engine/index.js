@@ -671,7 +671,7 @@ async function processAutopilot(env) {
   let job=await env.DB.prepare("SELECT * FROM autopilot_jobs WHERE workspace_id=? AND status IN ('queued','generating','generating_scenes') ORDER BY created_at LIMIT 1").bind(workspaceId).first();
   if(!job) {
     const target=Math.min(5,Math.max(1,Number(settings.daily_target||3)));
-    const totals=await env.DB.prepare("SELECT SUM(CASE WHEN created_at>=? THEN 1 ELSE 0 END) AS attempts,SUM(CASE WHEN status IN ('render_queued','rendering','queued_publish','published') THEN 1 ELSE 0 END) AS produced FROM autopilot_jobs WHERE workspace_id=? AND day_key=?").bind(String(settings.updated_at||"1970-01-01"),workspaceId,dayKey).first();
+    const totals=await env.DB.prepare("SELECT SUM(CASE WHEN datetime(created_at)>=datetime(?) THEN 1 ELSE 0 END) AS attempts,SUM(CASE WHEN status IN ('render_queued','rendering','queued_publish','published') THEN 1 ELSE 0 END) AS produced FROM autopilot_jobs WHERE workspace_id=? AND day_key=?").bind(String(settings.updated_at||"1970-01-01"),workspaceId,dayKey).first();
     if(Number(totals?.produced||0)>=target||Number(totals?.attempts||0)>=target*3)return;
     const blocked=await env.DB.prepare("SELECT COUNT(*) AS total FROM autopilot_jobs WHERE workspace_id=? AND status IN ('render_queued','rendering','queued_publish')").bind(workspaceId).first();
     if(Number(blocked?.total||0)>0)return;
