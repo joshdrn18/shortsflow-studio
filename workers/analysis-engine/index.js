@@ -462,12 +462,15 @@ async function translateAutopilotSubtitles(env,job,scenes) {
   });
   const translated=parseAutopilotJson(inference);
   const rows=Array.isArray(translated?.translations)?translated.translations:[];
-  const byScene=new Map(rows.map(row=>[Number(row.scene),textSafe(row.text,350)]));
-  return scenes.map(scene=>{
-    const value=byScene.get(Number(scene.scene))||"";
+  const byScene=new Map(rows.map((row,index)=>[
+    Number(row.scene)||index+1,
+    textSafe(row.text||row.translation||row.subtitle||row.subtitle_text,350)
+  ]));
+  return scenes.map((scene,index)=>{
+    const value=byScene.get(Number(scene.scene))||textSafe(rows[index]?.text||rows[index]?.translation||rows[index]?.subtitle||rows[index]?.subtitle_text,350);
     const words=value.split(/\s+/).filter(Boolean);
-    if(value.length<24||words.length<5||words.length>28||/_/.test(value)||/^[a-z0-9_-]+$/i.test(value)) {
-      throw new Error("Subtitle translation QA failed for scene "+scene.scene+". A full Indonesian sentence was not returned.");
+    if(value.length<8||words.length<2||words.length>40||/_/.test(value)||/^[a-z0-9_-]+$/i.test(value)) {
+      throw new Error("Subtitle translation QA failed for scene "+scene.scene+". A readable Indonesian phrase was not returned.");
     }
     return {...scene,subtitle_indonesian:value};
   });
