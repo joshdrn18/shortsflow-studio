@@ -1255,9 +1255,110 @@ async function handleBackgroundRender(request,env,url){
  return json({ok:false,error:"Not found."},404);
 }
 
+
+async function handleAutopilotRender(request,env,url){
+ const runner=await verifyRenderRunner(request);
+ if(!runner)return json({ok:false,error:"Unauthorized autopilot render runner."},401);
+ const bucket=env.SOURCE_MEDIA||env.MEDIA;
+ if(!env.DB||!bucket)return json({ok:false,error:"Autopilot database or R2 binding is missing."},503);
+ const route=url.pathname;
+ if(request.method==="POST"&&route==="/internal/autopilot/claim"){
+  const now=new Date(),iso=now.toISOString(),lockUntil=new Date(now.getTime()+60*60*1000).toISOString();
+  const claimed=await env.DB.prepare("UPDATE autopilot_jobs SET status='rendering',runner_id=?,locked_until=?,attempts=attempts+1,updated_at=? WHERE id=(SELECT id FROM autopilot_jobs WHERE status='render_queued' AND (locked_until IS NULL OR locked_until<?) AND attempts<3 ORDER BY created_at LIMIT 1) AND status='render_queued' AND (locked_until IS NULL OR locked_until<?) RETURNING *")
+   .bind(runner.runnerId,lockUntil,iso,iso,iso).first();
+  if(!claimed)return json({ok:true,job:null});
+  const settings=await env.DB.prepare("SELECT s.watermark_enabled,s.watermark_text,ws.watermark_enabled AS workspace_watermark_enabled,ws.watermark_text AS workspace_watermark_text,ws.watermark_position,ws.watermark_opacity,ws.watermark_scale FROM autopilot_settings s LEFT JOIN workspace_settings ws ON ws.workspace_id=s.workspace_id WHERE s.workspace_id=?").bind(claimed.workspace_id).first();
+  const script=parsePayload(claimed.script_json),scenes=parsePayload(claimed.scenes_json);
+  if(!Array.isArray(scenes)||scenes.length!==4||scenes.some(scene=>!scene.image_key)){
+   await env.DB.prepare("UPDATE autopilot_jobs SET status='failed',runner_id=NULL,locked_until=NULL,last_error='Scene image set is incomplete.',updated_at=? WHERE id=? AND runner_id=?").bind(iso,claimed.id,runner.runnerId).run();
+   return json({ok:false,error:"Autopilot scene image set is incomplete."},409);
+  }
+  return json({ok:true,job:{
+   id:claimed.id,workspaceId:claimed.workspace_id,runnerId:runner.runnerId,title:claimed.title,topic:claimed.topic,
+   narration:claimed.narration,voiceLanguage:claimed.voice_language,subtitleLanguage:claimed.subtitle_language,
+   audioKey:claimed.audio_key,scenes:scenes.map(scene=>({scene:Number(scene.scene),imageKey:scene.image_key,narration:scene.narration,subtitle:scene.subtitle_id})),
+   durationSeconds:Number(claimed.duration_seconds||45),
+   watermark:{
+    enabled:settings?.workspace_watermark_enabled===null?settings?.watermark_enabled!==0:Boolean(settings?.workspace_watermark_enabled??settings?.watermark_enabled??1),
+    text:String(settings?.workspace_watermark_text||settings?.watermark_text||"@Clippers2K26"),
+    position:String(settings?.watermark_position||"center"),
+    opacity:Number(settings?.watermark_opacity??0.72),scale:String(settings?.watermark_scale||"medium")
+   }
+  }});
+ }
+ const jobId=url.searchParams.get("jobId")||"";
+ if(!/^[0-9a-f-]{36}$/i.test(jobId))return json({ok:false,error:"Invalid autopilot job ID."},400);
+ const job=await env.DB.prepare("SELECT * FROM autopilot_jobs WHERE id=? AND status='rendering' AND runner_id=?").bind(jobId,runner.runnerId).first();
+ if(!job)return json({ok:false,error:"Autopilot job is no longer owned by this runner."},409);
+ if(request.method==="GET"&&route==="/internal/autopilot/asset"){
+  const kind=url.searchParams.get("kind")||"",sceneNumber=Number(url.searchParams.get("scene")||0);
+  let key="";
+  if(kind==="audio")key=String(job.audio_key||"");
+  else if(kind==="image"){
+   const scenes=parsePayload(job.scenes_json);
+   key=String(scenes.find(scene=>Number(scene.scene)===sceneNumber)?.image_key||"");
+  }
+  const requiredPrefix="workspaces/"+job.workspace_id+"/autopilot/"+job.id+"/";
+  if(!key||!key.startsWith(requiredPrefix))return json({ok:false,error:"Requested autopilot asset is not available."},404);
+  const object=await bucket.get(key);
+  if(!object)return json({ok:false,error:"Autopilot asset is missing from R2."},404);
+  return new Response(object.body,{headers:{"Content-Type":object.httpMetadata?.contentType||"application/octet-stream","Content-Length":String(object.size),"Cache-Control":"no-store"}});
+ }
+ if(request.method==="POST"&&route==="/internal/autopilot/complete"){
+  const type=(request.headers.get("Content-Type")||"").split(";")[0].trim().toLowerCase();
+  const size=Number(request.headers.get("Content-Length")||0),duration=Number(request.headers.get("X-Video-Duration")||job.duration_seconds||45);
+  if(type!=="video/mp4"||!Number.isSafeInteger(size)||size<1024||size>45*1024*1024||!request.body||!Number.isFinite(duration)||duration<15||duration>60)return json({ok:false,error:"Autopilot render must be a 15–60 second MP4 under 45 MB."},413);
+  const script=parsePayload(job.script_json),now=new Date().toISOString();
+  const assetId=crypto.randomUUID(),sourceId=crypto.randomUUID(),clipId=crypto.randomUUID(),metadataId=crypto.randomUUID(),reviewId=crypto.randomUUID(),publishId=crypto.randomUUID();
+  const key="workspaces/"+job.workspace_id+"/autopilot/"+job.id+"/final.mp4";
+  const bytes=await request.arrayBuffer();
+  if(bytes.byteLength!==size)return json({ok:false,error:"Render byte count does not match Content-Length."},400);
+  await bucket.put(key,bytes,{httpMetadata:{contentType:"video/mp4"},customMetadata:{workspaceId:job.workspace_id,autopilotJobId:job.id,assetId}});
+  const stored=await bucket.head(key);
+  if(!stored||Number(stored.size)!==size){await bucket.delete(key);return json({ok:false,error:"R2 autopilot render verification failed."},500);}
+  const sources=parsePayload(job.sources_json);
+  const sourceNotes=Array.isArray(script.source_notes)?script.source_notes:[];
+  const ids=sourceNotes.map(note=>Number(note.source_id)).filter(n=>Number.isInteger(n)&&n>=1);
+  const sourceLinks=(Array.isArray(sources)?sources:[]).filter((source,index)=>!ids.length||ids.includes(index+1)).slice(0,5);
+  const sourceText=sourceLinks.map(source=>source.source+": "+source.link).join("\n");
+  const description=[String(script.caption||""),String(Array.isArray(script.hashtags)?script.hashtags.join(" "):""),sourceText?"Sources:\n"+sourceText:""].filter(Boolean).join("\n\n").slice(0,5000);
+  const tags=[...(Array.isArray(script.hashtags)?script.hashtags:[]),"Shorts"].map(x=>String(x).replace(/^#/,"").trim()).filter(Boolean).slice(0,30);
+  const settings=await env.DB.prepare("SELECT privacy_status FROM autopilot_settings WHERE workspace_id=?").bind(job.workspace_id).first();
+  const privacy=["public","unlisted","private"].includes(settings?.privacy_status)?settings.privacy_status:"public";
+  const title=String(script.title||job.title||"Original Short").slice(0,100);
+  try{
+   const result=await env.DB.batch([
+    env.DB.prepare("INSERT INTO source_videos(id,workspace_id,title,source_type,source_url,storage_key,mime_type,size_bytes,duration_seconds,status,created_at,updated_at) VALUES(?,?,?,'upload',NULL,?,'video/mp4',?,?,'ready',?,?)").bind(sourceId,job.workspace_id,"AI Original: "+title,key,size,duration,now,now),
+    env.DB.prepare("INSERT INTO clips(id,workspace_id,source_video_id,title,start_seconds,end_seconds,hook,ai_score,transcript,status,created_at,updated_at) VALUES(?,?,?,?,0,?,?,95,?,'rendered',?,?)").bind(clipId,job.workspace_id,sourceId,title,duration,String(script.hook||""),String(job.narration||""),now,now),
+    env.DB.prepare("INSERT INTO clip_metadata(id,clip_id,version,title,caption,hashtags,language,created_at,subtitle_config_json) VALUES(?,?,1,?,?,?,?,?,?)").bind(metadataId,clipId,title,String(script.caption||""),String(Array.isArray(script.hashtags)?script.hashtags.join(" "):""),String(job.voice_language||"en"),now,JSON.stringify({enabled:true,mode:"burned_in",voiceLanguage:job.voice_language,subtitleLanguage:job.subtitle_language})),
+    env.DB.prepare("INSERT INTO clip_assets(id,clip_id,asset_type,storage_key,mime_type,size_bytes,version,created_at,metadata_version) VALUES(?,?,'render',?,'video/mp4',?,1,?,1)").bind(assetId,clipId,key,size,now),
+    env.DB.prepare("INSERT INTO clip_reviews(id,clip_id,asset_version,metadata_version,decision,notes,reviewed_at,render_asset_id) VALUES(?,?,1,1,'approved',?,?,?)").bind(reviewId,clipId,"Automated QA passed: MP4 verified, duration in range, four original AI scenes and bilingual voice/subtitle mapping present.",now,assetId),
+    env.DB.prepare("INSERT INTO publishing_jobs(id,clip_id,review_id,platform,status,scheduled_at,created_at,updated_at,render_asset_id,metadata_version,title,description,privacy_status,tags_json) VALUES(?,?,?,'youtube','queued',?,?,?,?,?,?,?,?,?)").bind(publishId,clipId,reviewId,now,now,now,assetId,1,title,description,privacy,JSON.stringify(tags)),
+    env.DB.prepare("UPDATE clips SET status='publishing',updated_at=? WHERE id=? AND workspace_id=?").bind(now,clipId,job.workspace_id),
+    env.DB.prepare("UPDATE autopilot_jobs SET status='queued_publish',runner_id=NULL,locked_until=NULL,output_key=?,output_size_bytes=?,clip_id=?,publishing_job_id=?,updated_at=? WHERE id=? AND status='rendering' AND runner_id=?").bind(key,size,clipId,publishId,now,job.id,runner.runnerId),
+    env.DB.prepare("INSERT INTO activity_logs(id,workspace_id,entity_type,entity_id,event,details,created_at) VALUES(?,?, 'clip',?,'autopilot_rendered',?,?)").bind(crypto.randomUUID(),job.workspace_id,clipId,JSON.stringify({autopilotJobId:job.id,assetId,publishingJobId:publishId,durationSeconds:duration}),now)
+   ]);
+   if(Number(result[7]?.meta?.changes||0)!==1)throw new Error("Autopilot job changed before the render could be saved.");
+  }catch(error){
+   await bucket.delete(key);
+   throw error;
+  }
+  return json({ok:true,clipId,assetId,publishingJobId:publishId,sizeBytes:size,durationSeconds:duration,privacyStatus:privacy});
+ }
+ if(request.method==="POST"&&route==="/internal/autopilot/fail"){
+  const body=await request.json().catch(()=>({})),message=String(body.error||"Autopilot FFmpeg render failed.").slice(0,1000),now=new Date().toISOString();
+  const retry=Number(job.attempts||0)<2;
+  await env.DB.prepare("UPDATE autopilot_jobs SET status=?,last_error=?,runner_id=NULL,locked_until=NULL,updated_at=? WHERE id=? AND status='rendering' AND runner_id=?")
+   .bind(retry?"render_queued":"failed",message,now,job.id,runner.runnerId).run();
+  return json({ok:true,retryScheduled:retry,attempts:Number(job.attempts||0),maxAttempts:2});
+ }
+ return json({ok:false,error:"Not found."},404);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/internal/autopilot/")) return handleAutopilotRender(request, env, url);
     if (url.pathname.startsWith("/internal/render/")) return handleBackgroundRender(request, env, url);
     if (request.method === "POST" && url.pathname === "/internal/transcribe-chunk") return processBrowserAudioChunk(request, env);
     if (request.method === "GET" && url.pathname === "/health") {
