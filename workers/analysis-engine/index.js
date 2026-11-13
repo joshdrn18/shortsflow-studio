@@ -365,14 +365,35 @@ function parseAutopilotJson(result) {
       const raw=candidate.trim().replace(/^\x60\x60\x60(?:json)?\s*/i,"").replace(/\s*\x60\x60\x60$/i,"");
       const first=raw.indexOf("{"),last=raw.lastIndexOf("}");
       if(first>=0&&last>first) {
+        const jsonText=raw.slice(first,last+1);
         try {
-          const parsed=JSON.parse(raw.slice(first,last+1));
+          const parsed=JSON.parse(jsonText);
           if(parsed&&typeof parsed==="object")queue.unshift(parsed);
-        } catch {}
+        } catch {
+          try {
+            const repaired=JSON.parse(jsonText.replace(/,\s*([}\]])/g,"$1"));
+            if(repaired&&typeof repaired==="object")queue.unshift(repaired);
+          } catch {}
+        }
       }
     }
   }
-  throw new Error("Autopilot model did not return a valid script JSON object.");
+  const rootKeys=result&&typeof result==="object"?Object.keys(result).slice(0,12).join(","):"none";
+  const snippets=[];
+  const inspectQueue=[result],inspectSeen=new Set();
+  while(inspectQueue.length&&snippets.length<3) {
+    const value=inspectQueue.shift();
+    if(value===null||value===undefined)continue;
+    if(typeof value==="string") {
+      if(value.trim())snippets.push(value.trim().slice(0,180));
+    } else if(typeof value==="object") {
+      if(inspectSeen.has(value))continue;
+      inspectSeen.add(value);
+      if(Array.isArray(value))inspectQueue.push(...value.slice(0,5));
+      else for(const key of ["response","output_text","result","text","output","content","choices","message","data","generated_text"])if(value[key]!==undefined)inspectQueue.push(value[key]);
+    }
+  }
+  throw new Error("Autopilot model did not return valid script JSON. rootKeys="+rootKeys+"; preview="+JSON.stringify(snippets).slice(0,520));
 }
 function parseAutopilotScript(result) { return parseAutopilotJson(result); }
 function localDayKey(timeZone,date=new Date()) {
@@ -579,6 +600,7 @@ async function generateAutopilotScript(env,job,bucket) {
     .bind(job.workspace_id,new Date(Date.now()-30*86400000).toISOString()).all();
   const avoid=(previous.results||[]).map(item=>item.title+" — "+item.topic).join("\n");
   const selectedResearch=sources.slice(0,3);
+  await env.DB.prepare("UPDATE autopilot_jobs SET sources_json=?,updated_at=? WHERE id=? AND status='generating'").bind(JSON.stringify(selectedResearch),new Date().toISOString(),job.id).run();
   const sourceBrief=selectedResearch.map((item,index)=>
     "["+(index+1)+"] TITLE: "+item.title+
     " | PUBLISHER: "+item.source+
@@ -622,7 +644,11 @@ async function generateAutopilotScript(env,job,bucket) {
       messages:[{role:"system",content:system},{role:"user",content:retryPrompt}],
       max_tokens:2400,temperature:0.1,response_format:{type:"json_object"}
     });
-    script=parseAutopilotScript(inference);
+    try {
+      script=parseAutopilotScript(inference);
+    } catch(retryError) {
+      throw new Error("Script JSON retry failed: "+String(retryError?.message||retryError).slice(0,700));
+    }
   }
   if(script.skip)throw new Error(String(script.skip_reason||"Article evidence was not strong enough."));
   if(!script.title||!script.topic||!script.narration) {
