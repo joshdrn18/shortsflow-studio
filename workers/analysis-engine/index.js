@@ -341,20 +341,33 @@ function autoXmlField(block,name) {
 }
 function textSafe(value,max) { return String(value??"").replace(/\s+/g," ").trim().slice(0,max); }
 function parseAutopilotJson(result) {
-  const candidates=[result?.response,result?.output_text,result?.result,result?.text,result];
-  for(const candidate of candidates) {
-    if(candidate&&typeof candidate==="object"&&!Array.isArray(candidate)) {
-      if(candidate.script&&typeof candidate.script==="object")return candidate.script;
-      if(candidate.response&&typeof candidate.response==="object")return candidate.response;
-      return candidate;
+  const queue=[result];
+  const seen=new Set();
+  while(queue.length) {
+    const candidate=queue.shift();
+    if(candidate===null||candidate===undefined)continue;
+    if(typeof candidate==="object") {
+      if(seen.has(candidate))continue;
+      seen.add(candidate);
+      if(!Array.isArray(candidate)&&(candidate.title||candidate.skip===true)&&Array.isArray(candidate.scenes))return candidate;
+      if(!Array.isArray(candidate)&&candidate.script&&typeof candidate.script==="object")queue.unshift(candidate.script);
+      for(const key of ["response","output_text","result","text","output","content"]) {
+        if(candidate[key]!==undefined&&candidate[key]!==null)queue.push(candidate[key]);
+      }
+      continue;
     }
-    const raw=String(candidate||"").trim().replace(/^\x60\x60\x60(?:json)?\s*/i,"").replace(/\s*\x60\x60\x60$/i,"");
-    const first=raw.indexOf("{"),last=raw.lastIndexOf("}");
-    if(first>=0&&last>first) {
-      try{return JSON.parse(raw.slice(first,last+1));}catch{}
+    if(typeof candidate==="string") {
+      const raw=candidate.trim().replace(/^\x60\x60\x60(?:json)?\s*/i,"").replace(/\s*\x60\x60\x60$/i,"");
+      const first=raw.indexOf("{"),last=raw.lastIndexOf("}");
+      if(first>=0&&last>first) {
+        try {
+          const parsed=JSON.parse(raw.slice(first,last+1));
+          if(parsed&&typeof parsed==="object")queue.unshift(parsed);
+        } catch {}
+      }
     }
   }
-  throw new Error("Autopilot model did not return valid JSON.");
+  throw new Error("Autopilot model did not return a valid script JSON object.");
 }
 function parseAutopilotScript(result) { return parseAutopilotJson(result); }
 function localDayKey(timeZone,date=new Date()) {
@@ -448,7 +461,9 @@ async function generateAutopilotScript(env,job,bucket) {
   const script=parseAutopilotScript(inference);
   if(script.skip)throw new Error(String(script.skip_reason||"Article evidence was not strong enough."));
   if(!script.title||!script.topic||!script.narration||!Array.isArray(script.scenes)||script.scenes.length<4) {
-    throw new Error("Generated Short script is incomplete.");
+    const keys=script&&typeof script==="object"?Object.keys(script).slice(0,16).join(","):"not-an-object";
+    const sceneCount=Array.isArray(script?.scenes)?script.scenes.length:0;
+    throw new Error("Generated Short script is incomplete (fields: "+keys+"; scenes: "+sceneCount+").");
   }
   const allowedIds=new Set(sources.map((source,index)=>index+1));
   const sourceNotes=(Array.isArray(script.source_notes)?script.source_notes:[])
