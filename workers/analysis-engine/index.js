@@ -573,7 +573,7 @@ async function generateAutopilotScript(env,job,bucket) {
   script.narration=await normalizeAutopilotNarration(env,job,script,sourceForNarration);
   const selectedIds=new Set(sourceNotes.map(note=>note.source_id));
   let sceneDrafts=Array.isArray(script.scenes)?script.scenes.slice(0,4):[];
-  const draftWordCount=sceneDrafts.reduce((total,scene)=>total+String(scene?.narration||"").split(/\\s+/).filter(Boolean).length,0);
+  const draftWordCount=sceneDrafts.reduce((total,scene)=>total+String(scene?.narration||"").split(/\s+/).filter(Boolean).length,0);
   if(sceneDrafts.length<4||draftWordCount<75) {
     const narrationParts=splitAutopilotNarration(script.narration);
     const firstDraft=sceneDrafts[0]||{};
@@ -608,7 +608,7 @@ async function generateAutopilotScript(env,job,bucket) {
     throw new Error("Research QA failed: a scene is missing its source reference, narration, or visual direction.");
   }
   const narration=scenes.map(scene=>scene.narration).join(" ");
-  const spokenWordCount=narration.split(/\\s+/).filter(Boolean).length;
+  const spokenWordCount=narration.split(/\s+/).filter(Boolean).length;
   if(spokenWordCount<80||spokenWordCount>125||narration.length>1900)throw new Error("Narration length QA failed: expected 80–125 spoken words, received "+spokenWordCount+".");
   const selectedSources=sources.filter((source,index)=>selectedIds.has(index+1));
   const sourceCorpus=selectedSources.map(source=>source.title+" "+source.article_excerpt).join(" ").toLowerCase();
@@ -994,7 +994,7 @@ async function processClipDiscovery(env, job) {
   const accepted = [];
   const rejected = { invalidTime: 0, boundary: 0, tooShort: 0, tooLong: 0, outsideDuration: 0, overlap: 0, duplicateContent: 0, missingHook: 0, missingExcerpt: 0 };
   const contentTokens = value => new Set(String(value || "").toLowerCase()
-    .replace(/[^\\p{L}\\p{N}\\s]/gu, " ").split(/\\s+/)
+    .replace(/[^\\p{L}\\p{N}\\s]/gu, " ").split(/\s+/)
     .filter(token => token.length >= 3 && !/^(the|and|that|this|with|from|then|when|what|where|which|have|will|your|you|are|was|were|for|but|not|can|just|like|they|them|their|there|into|about|because|jadi|yang|dan|atau|untuk|dari|dengan|ini|itu|kamu|aku|dia|ada|bisa|akan|kalau|karena|pada|dalam)$/i.test(token)));
   const contentSimilarity = (left, right) => {
     const a = contentTokens(left), b = contentTokens(right);
@@ -1016,12 +1016,12 @@ async function processClipDiscovery(env, job) {
     const hook = String(candidate.hook || "").trim();
     const reason = String(candidate.reason || "").trim();
     const caption = String(candidate.caption || "").trim();
-    const titleWords = title.split(/\\s+/).filter(Boolean).length;
+    const titleWords = title.split(/\s+/).filter(Boolean).length;
     const genericTitle = /^(yes|yeah|yep|no|okay|ok|wow|whoa|oh|hey|look|wait|what|huh|hello|hi)[.!?\\s]*$/i.test(title);
     const normalizedHook = hook.toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu, " ").replace(/\\s+/g, " ").trim();
     const normalizedTitle = title.toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu, " ").replace(/\\s+/g, " ").trim();
     const payoffPattern = /\\b(reveal|reveals|revealed|secret|surprise|unexpected|finally|turns out|plot twist|the truth|lesson|mistake|because|until|ternyata|akhirnya|rahasia|kejutan|faktanya|justru|malah|alasannya|kesalahan|pelajaran|solusinya)\\b/i;
-    const hookWords = hook.split(/\\s+/).filter(Boolean);
+    const hookWords = hook.split(/\s+/).filter(Boolean);
     const curiosityPattern = /\\b(why|how|what|never|secret|truth|mistake|nobody|everyone|until|before|after|instead|because|impossible|hidden|actually|turns out|ternyata|kenapa|mengapa|rahasia|fakta|kesalahan|ternyata|akhirnya|justru|malah|bagaimana)\\b/i;
     const specificityPattern = /\\b\\d+\\b|\\b(first|last|only|exactly|every|one|dua|tiga|pertama|terakhir|satu)\\b/i;
     const hookLengthQuality = hookWords.length >= 5 && hookWords.length <= 14 ? 1 :
@@ -1121,11 +1121,11 @@ async function processClipDiscovery(env, job) {
     );
     // Keep the model's score as the persisted AI score, but rank with a blended
     // score so transcript substance and a self-contained ending influence selection.
-    const candidateTokens = new Set([title,hook,reason].join(" ").toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu," ").split(/\\s+/).filter(token=>token.length>=3));
+    const candidateTokens = new Set([title,hook,reason].join(" ").toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu," ").split(/\s+/).filter(token=>token.length>=3));
     let winnerSimilarity = 0;
     if (winnerLearning.confidence > 0 && candidateTokens.size >= 3) {
       for (const winner of winnerLearning.patterns) {
-        const winnerTokens = new Set([winner.title,winner.hook].join(" ").toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu," ").split(/\\s+/).filter(token=>token.length>=3));
+        const winnerTokens = new Set([winner.title,winner.hook].join(" ").toLowerCase().replace(/[^\\p{L}\\p{N}\\s]/gu," ").split(/\s+/).filter(token=>token.length>=3));
         if (winnerTokens.size < 3) continue;
         let overlap = 0;
         for (const token of candidateTokens) if (winnerTokens.has(token)) overlap++;
@@ -1225,12 +1225,12 @@ async function processClipDiscovery(env, job) {
     });
     if (duplicateContent) { rejected.duplicateContent++; continue; }
 
-    const hook = String(candidate.hook || excerpt.split(/(?<=[.!?])\\s+/)[0] || excerpt.split(/\\s+/).slice(0, 14).join(" ")).trim().slice(0, 220);
+    const hook = String(candidate.hook || excerpt.split(/(?<=[.!?])\\s+/)[0] || excerpt.split(/\s+/).slice(0, 14).join(" ")).trim().slice(0, 220);
     if (!hook) { rejected.missingHook++; continue; }
     const proposedTitle = String(candidate.title || "").trim();
     const genericTitle = /^(yes|yeah|yep|no|okay|ok|wow|whoa|oh|hey|look|wait|what|huh|hello|hi)[.!?\s]*$/i.test(proposedTitle);
     const title = String(genericTitle ? (candidate.reason || excerpt.split(/[.!?]/)[0] || candidate.hook) : (proposedTitle || candidate.reason || excerpt.split(/[.!?]/)[0] || "Untitled clip")).trim().slice(0, 120);
-    let hashtagList = Array.isArray(candidate.hashtags) ? candidate.hashtags : String(candidate.hashtags || "").split(/\\s+/);
+    let hashtagList = Array.isArray(candidate.hashtags) ? candidate.hashtags : String(candidate.hashtags || "").split(/\s+/);
     hashtagList = hashtagList.map(tag => String(tag).trim().replace(/^#?/, "#").replace(/[^#\\p{L}\\p{N}_]/gu, ""))
       .filter(tag => tag.length > 2 && !/^#(topic|viral|fyp|shorts|trending|funny|wow)$/i.test(tag));
     if (hashtagList.length < 3) {
