@@ -501,7 +501,7 @@ async function generateAutopilotScript(env,job,bucket) {
     sceneDrafts=narrationParts.map((part,index)=>({
       scene:index+1,narration:part,
       visual_prompt:baseVisual+" Shot direction: "+shotDirections[index]+" Keep the exact same subject, setting and factual context; do not introduce additional people, objects, numbers or events.",
-      on_screen_text:part.split(/\\s+/).slice(0,5).join(" "),
+      on_screen_text:part.split(/\s+/).slice(0,5).join(" "),
       source_ids:[...selectedIds]
     }));
   }
