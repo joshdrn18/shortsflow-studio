@@ -437,39 +437,111 @@ async function discoverAutopilotSources() {
   return enriched.filter(Boolean).slice(0,8);
 }
 
+
+async function translateAutopilotSubtitles(env,job,scenes) {
+  const input=scenes.map(scene=>({scene:scene.scene,english:scene.narration}));
+  const system=[
+    "You are a professional English-to-Indonesian subtitle translator.",
+    "Translate each full English spoken line into natural, fluent Bahasa Indonesia.",
+    "Return a complete sentence or natural spoken phrase, not a label, topic, slug, keyword, filename, or identifier.",
+    "Never return underscores, IDs, or shortened names in place of a translation. Preserve the meaning, facts, numbers, proper names, and tone.",
+    "Keep each translation concise enough for a 40–50 second vertical video. Do not add new facts.",
+    "Return only JSON in the exact shape: {\"translations\":[{\"scene\":1,\"text\":\"Kalimat terjemahan Bahasa Indonesia yang lengkap.\"}]}"
+  ].join(" ");
+  const prompt="Translate the following narration lines into Bahasa Indonesia. Return exactly one translation for each scene and preserve the scene numbers:\n"+JSON.stringify(input);
+  if(!await reserveTextBudget(env,"autopilot-translation:"+job.id,Math.ceil((system.length+prompt.length)/3),700)) {
+    throw new Error("Daily Workers AI safety budget reached before subtitle translation.");
+  }
+  const inference=await env.AI.run(CLIP_MODEL,{
+    messages:[{role:"system",content:system},{role:"user",content:prompt}],
+    max_tokens:700,temperature:0.1,response_format:{type:"json_object"}
+  });
+  const translated=parseAutopilotJson(inference);
+  const rows=Array.isArray(translated?.translations)?translated.translations:[];
+  const byScene=new Map(rows.map(row=>[Number(row.scene),textSafe(row.text,350)]));
+  return scenes.map(scene=>{
+    const value=byScene.get(Number(scene.scene))||"";
+    const words=value.split(/\s+/).filter(Boolean);
+    if(value.length<24||words.length<5||words.length>24||/_/.test(value)||/^[a-z0-9_-]+$/i.test(value)) {
+      throw new Error("Subtitle translation QA failed for scene "+scene.scene+". A full Indonesian sentence was not returned.");
+    }
+    return {...scene,subtitle_indonesian:value};
+  });
+}
 async function generateAutopilotScript(env,job,bucket) {
   const sources=await discoverAutopilotSources();
-  if(sources.length<3)throw new Error("Not enough recent source material; this slot was skipped rather than inventing a trend.");
+  if(sources.length<3)throw new Error("Fewer than three recent publisher articles could be verified. This slot was skipped rather than inventing a trend.");
   const previous=await env.DB.prepare("SELECT title,topic FROM autopilot_jobs WHERE workspace_id=? AND created_at>? ORDER BY created_at DESC LIMIT 20")
     .bind(job.workspace_id,new Date(Date.now()-30*86400000).toISOString()).all();
   const avoid=(previous.results||[]).map(item=>item.title+" — "+item.topic).join("\n");
-  const sourceBrief=sources.map((item,index)=>"["+(index+1)+"] "+item.title+" | "+item.source+" | "+item.published+" | "+item.summary+" | "+item.link).join("\n");
+  const sourceBrief=sources.map((item,index)=>
+    "["+(index+1)+"] TITLE: "+item.title+
+    " | PUBLISHER: "+item.source+
+    " | PUBLISHED: "+item.published+
+    " | EVIDENCE LEVEL: "+item.evidence_level+
+    " | ARTICLE EXCERPT: "+item.article_excerpt+
+    " | URL: "+item.article_url
+  ).join("\n\n");
   const system=[
-    "You are the editorial producer for an original YouTube Shorts channel.",
-    "Create a highly engaging but factually conservative 40–50 second mini-documentary from current source material.",
-    "Choose the strongest single story using freshness, clear audience interest, emotional curiosity, and a concrete payoff. Never claim anything is guaranteed viral.",
-    "Use only facts directly supported by supplied source titles and summaries. Do not invent quotes, statistics, scores, dates, names, causes, or details. If evidence is insufficient, return {\"skip\":true,\"skip_reason\":\"insufficient source evidence\"}.",
-    "Narration must be natural English for a global audience. Every scene also needs concise, accurate Bahasa Indonesia translation for burned-in subtitles.",
-    "Use exactly four scenes. Each scene needs English narration, Indonesian translation, and a distinct original cinematic image prompt.",
-    "Visual prompts must describe original AI-generated illustrative footage only. Do not recreate copyrighted clips, named creators, celebrities, logos, broadcast footage, or recognizable fictional characters. No words, text, logos, subtitles, or watermarks inside images.",
-    "Write a first-two-second hook, keep narration speakable, and end with a satisfying factual payoff. Avoid generic clickbait and engagement bait.",
-    "Return a JSON object with title, niche, topic, hook, narration, caption, hashtags, source_notes, scenes. Each scene: scene, narration, subtitle_id, visual_prompt, on_screen_text. No markdown."
+    "You are the editorial producer for a professional original YouTube Shorts channel.",
+    "Create one compelling 40–50 second mini-documentary from a single specific current story with strong audience interest and a clear factual payoff. Optimize for curiosity, retention and shareability; never promise virality or invent popularity signals.",
+    "The supplied material includes actual publisher article text excerpts, not just headlines. Use only facts explicitly supported by those excerpts. Do not invent statistics, quotations, dates, results, causes, locations, identities, or context. If the excerpts do not support a coherent story, return {\"skip\":true,\"skip_reason\":\"article evidence is insufficient\"}.",
+    "Choose one story only. You may use at most two sources, and they must discuss the same story. Do not combine unrelated headlines into a generic global roundup.",
+    "Every factual scene must be traceable to one or more supplied source IDs. The source_notes array must contain objects with numeric source_id and a short used_for description. Each scene must include source_ids as an array of those same numeric IDs.",
+    "Narration is English, natural to speak and suitable for a global audience. Do not return translations in this script; subtitles are generated separately by a dedicated translator.",
+    "Use exactly four scenes. Each scene needs a concrete factual narration, an original cinematic visual prompt, and brief on_screen_text of at most 6 words.",
+    "Visuals must be original AI-generated illustrative scenes only. Do not recreate third-party footage, named creators, celebrities, logos, broadcast clips, or recognizable fictional characters. No text, captions, logos, or watermarks inside generated images.",
+    "Use a specific non-generic title and first-two-second hook, a satisfying factual payoff, and a concise caption. Avoid generic clickbait, false urgency, and unsupported superlatives.",
+    "Return only compact valid JSON in this exact shape:",
+    "{\"title\":\"Specific title\",\"niche\":\"Science, technology, gaming, sports, or culture\",\"topic\":\"Specific story\",\"hook\":\"Opening hook\",\"narration\":\"Full English narration\",\"caption\":\"Short caption\",\"hashtags\":[\"#Shorts\"],\"source_notes\":[{\"source_id\":1,\"used_for\":\"The fact this source supports\"}],\"scenes\":[{\"scene\":1,\"narration\":\"English narration sentence\",\"visual_prompt\":\"Detailed original scene visual prompt\",\"on_screen_text\":\"Short words\",\"source_ids\":[1]}]}"
   ].join(" ");
-  const prompt="RECENT NEWS AND TREND LEADS (use only evidence provided; links are for attribution):\n"+sourceBrief+
+  const prompt="CURRENT PUBLISHER ARTICLE EVIDENCE:\n"+sourceBrief+
     "\n\nRECENT CHANNEL TOPICS TO AVOID REPEATING:\n"+(avoid||"None.")+
-    "\n\nCreate one original Short. Voice: English. Subtitles: Bahasa Indonesia. Target length: about 45 seconds. Return compact valid JSON only.";
-  if(!await reserveTextBudget(env,"autopilot-script:"+job.id,Math.ceil((system.length+prompt.length)/3),1500))throw new Error("Daily Workers AI safety budget reached.");
-  const inference=await env.AI.run(CLIP_MODEL,{messages:[{role:"system",content:system},{role:"user",content:prompt}],max_tokens:1800,temperature:0.2,response_format:{type:"json_object"}});
+    "\n\nCreate one original Short. Voice: English. Subtitles will be separately translated to Bahasa Indonesia. Target length: about 45 seconds. Return compact valid JSON only.";
+  if(!await reserveTextBudget(env,"autopilot-script:"+job.id,Math.ceil((system.length+prompt.length)/3),1500)) {
+    throw new Error("Daily Workers AI safety budget reached.");
+  }
+  const inference=await env.AI.run(CLIP_MODEL,{
+    messages:[{role:"system",content:system},{role:"user",content:prompt}],
+    max_tokens:1800,temperature:0.15,response_format:{type:"json_object"}
+  });
   const script=parseAutopilotScript(inference);
-  if(script.skip)throw new Error(String(script.skip_reason||"Source evidence was not strong enough."));
-  if(!script.title||!script.narration||!Array.isArray(script.scenes)||script.scenes.length<4)throw new Error("Generated Short script is incomplete.");
-  const scenes=script.scenes.slice(0,4).map((scene,index)=>({
-    scene:index+1,narration:textSafe(scene.narration,500),subtitle_id:textSafe(scene.subtitle_id,500),
-    visual_prompt:textSafe(scene.visual_prompt,1800),on_screen_text:textSafe(scene.on_screen_text,60),image_key:null
-  }));
-  if(scenes.some(scene=>!scene.narration||!scene.subtitle_id||!scene.visual_prompt))throw new Error("Scene is missing narration, translation, or visual direction.");
+  if(script.skip)throw new Error(String(script.skip_reason||"Article evidence was not strong enough."));
+  if(!script.title||!script.topic||!script.narration||!Array.isArray(script.scenes)||script.scenes.length<4) {
+    throw new Error("Generated Short script is incomplete.");
+  }
+  const allowedIds=new Set(sources.map((source,index)=>index+1));
+  const sourceNotes=(Array.isArray(script.source_notes)?script.source_notes:[])
+    .filter(note=>Number.isInteger(Number(note.source_id))&&allowedIds.has(Number(note.source_id)))
+    .map(note=>({source_id:Number(note.source_id),used_for:textSafe(note.used_for,220)}));
+  if(!sourceNotes.length)throw new Error("Research QA failed: the script did not cite a valid publisher article.");
+  const selectedIds=new Set(sourceNotes.map(note=>note.source_id));
+  const scenes=script.scenes.slice(0,4).map((scene,index)=>{
+    const sourceIds=Array.isArray(scene.source_ids)?scene.source_ids.map(Number).filter(id=>selectedIds.has(id)):[...selectedIds];
+    return {
+      scene:index+1,
+      narration:textSafe(scene.narration,500),
+      visual_prompt:textSafe(scene.visual_prompt,1800),
+      on_screen_text:textSafe(scene.on_screen_text,60),
+      source_ids:sourceIds,
+      image_key:null
+    };
+  });
+  if(scenes.some(scene=>!scene.narration||!scene.visual_prompt||!scene.source_ids.length)) {
+    throw new Error("Research QA failed: a scene is missing its source reference, narration, or visual direction.");
+  }
   const narration=scenes.map(scene=>scene.narration).join(" ");
   if(narration.length<220||narration.length>1900)throw new Error("Narration length is outside the safe 40–50 second range.");
+  const selectedSources=sources.filter((source,index)=>selectedIds.has(index+1));
+  const sourceCorpus=selectedSources.map(source=>source.title+" "+source.article_excerpt).join(" ").toLowerCase();
+  const numericClaims=narration.match(/\b\d[\d,]*(?:\.\d+)?\b/g)||[];
+  for(const claim of numericClaims) {
+    const normalized=claim.replace(/,/g,"");
+    if(!sourceCorpus.includes(claim.toLowerCase())&&!sourceCorpus.includes(normalized)) {
+      throw new Error("Research QA rejected an unsupported number in the narration: "+claim);
+    }
+  }
+  const translatedScenes=await translateAutopilotSubtitles(env,job,scenes);
   const voiceResult=await env.AI.run("@cf/deepgram/aura-2-en",{text:narration,speaker:"luna",encoding:"mp3"});
   let audioBytes;
   if(voiceResult instanceof ReadableStream)audioBytes=await new Response(voiceResult).arrayBuffer();
@@ -485,11 +557,11 @@ async function generateAutopilotScript(env,job,bucket) {
     topic:textSafe(script.topic,180),hook:textSafe(script.hook,260),narration,
     caption:textSafe(script.caption,1200),
     hashtags:Array.isArray(script.hashtags)?script.hashtags.slice(0,8).map(x=>textSafe(x,50)):[],
-    source_notes:Array.isArray(script.source_notes)?script.source_notes.slice(0,8):[],scenes
+    source_notes:sourceNotes,scenes:translatedScenes
   };
   const now=new Date().toISOString();
   await env.DB.prepare("UPDATE autopilot_jobs SET status='generating_scenes',niche=?,topic=?,title=?,hook=?,narration=?,voice_language='en',subtitle_language='id',script_json=?,sources_json=?,audio_key=?,scenes_json=?,next_scene_number=1,duration_seconds=45,updated_at=? WHERE id=? AND status='generating'")
-    .bind(output.niche,output.topic,output.title,output.hook,narration,JSON.stringify(output),JSON.stringify(sources),audioKey,JSON.stringify(scenes),now,job.id).run();
+    .bind(output.niche,output.topic,output.title,output.hook,narration,JSON.stringify(output),JSON.stringify(selectedSources),audioKey,JSON.stringify(translatedScenes),now,job.id).run();
 }
 async function makeAutopilotReport(env,workspaceId,dayKey) {
   const rows=await env.DB.prepare("SELECT id,title,topic,status,platform_url,platform_video_id,last_error,created_at,published_at FROM autopilot_jobs WHERE workspace_id=? AND day_key=? ORDER BY created_at")
