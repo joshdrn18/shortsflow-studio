@@ -349,9 +349,13 @@ function parseAutopilotJson(result) {
     if(typeof candidate==="object") {
       if(seen.has(candidate))continue;
       seen.add(candidate);
-      if(!Array.isArray(candidate)&&(candidate.title||candidate.skip===true)&&Array.isArray(candidate.scenes))return candidate;
-      if(!Array.isArray(candidate)&&candidate.script&&typeof candidate.script==="object")queue.unshift(candidate.script);
-      for(const key of ["response","output_text","result","text","output","content"]) {
+      if(Array.isArray(candidate)) {
+        queue.push(...candidate);
+        continue;
+      }
+      if((candidate.title||candidate.skip===true)&&Array.isArray(candidate.scenes))return candidate;
+      if(candidate.script&&typeof candidate.script==="object")queue.unshift(candidate.script);
+      for(const key of ["response","output_text","result","text","output","content","choices","message","data"]) {
         if(candidate[key]!==undefined&&candidate[key]!==null)queue.push(candidate[key]);
       }
       continue;
