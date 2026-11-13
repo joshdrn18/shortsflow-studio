@@ -591,8 +591,9 @@ async function processAutopilot(env) {
   await makeAutopilotReport(env,workspaceId,dayKey);
   let job=await env.DB.prepare("SELECT * FROM autopilot_jobs WHERE workspace_id=? AND status IN ('queued','generating','generating_scenes') ORDER BY created_at LIMIT 1").bind(workspaceId).first();
   if(!job) {
-    const attempted=await env.DB.prepare("SELECT COUNT(*) AS total FROM autopilot_jobs WHERE workspace_id=? AND day_key=?").bind(workspaceId,dayKey).first();
-    if(Number(attempted?.total||0)>=Math.min(5,Math.max(1,Number(settings.daily_target||3))))return;
+    const target=Math.min(5,Math.max(1,Number(settings.daily_target||3)));
+    const totals=await env.DB.prepare("SELECT COUNT(*) AS attempts,SUM(CASE WHEN status IN ('render_queued','rendering','queued_publish','published') THEN 1 ELSE 0 END) AS produced FROM autopilot_jobs WHERE workspace_id=? AND day_key=?").bind(workspaceId,dayKey).first();
+    if(Number(totals?.produced||0)>=target||Number(totals?.attempts||0)>=target*3)return;
     const blocked=await env.DB.prepare("SELECT COUNT(*) AS total FROM autopilot_jobs WHERE workspace_id=? AND status IN ('render_queued','rendering','queued_publish')").bind(workspaceId).first();
     if(Number(blocked?.total||0)>0)return;
     const now=new Date().toISOString(),id=crypto.randomUUID();
@@ -600,6 +601,11 @@ async function processAutopilot(env) {
     job=await env.DB.prepare("SELECT * FROM autopilot_jobs WHERE id=?").bind(id).first();
   }
   try {
+    if(job.status==="generating" && Date.now()-Date.parse(job.updated_at||"")>15*60*1000) {
+      await env.DB.prepare("UPDATE autopilot_jobs SET status='failed',last_error='Generation timed out before a script and voice were saved.',updated_at=? WHERE id=? AND status='generating'")
+        .bind(new Date().toISOString(),job.id).run();
+      return;
+    }
     if(job.status==="queued") {
       await env.DB.prepare("UPDATE autopilot_jobs SET status='generating',updated_at=? WHERE id=? AND status='queued'").bind(new Date().toISOString(),job.id).run();
       job=await env.DB.prepare("SELECT * FROM autopilot_jobs WHERE id=?").bind(job.id).first();
@@ -1410,7 +1416,7 @@ async function handleAutopilotRender(request,env,url){
   return json({ok:true,job:{
    id:claimed.id,workspaceId:claimed.workspace_id,runnerId:runner.runnerId,title:claimed.title,topic:claimed.topic,
    narration:claimed.narration,voiceLanguage:claimed.voice_language,subtitleLanguage:claimed.subtitle_language,
-   audioKey:claimed.audio_key,scenes:scenes.map(scene=>({scene:Number(scene.scene),imageKey:scene.image_key,narration:scene.narration,subtitle:scene.subtitle_id})),
+   audioKey:claimed.audio_key,scenes:scenes.map(scene=>({scene:Number(scene.scene),imageKey:scene.image_key,narration:scene.narration,subtitle:scene.subtitle_indonesian})),
    durationSeconds:Number(claimed.duration_seconds||45),
    watermark:{
     enabled:settings?.workspace_watermark_enabled===null?settings?.watermark_enabled!==0:Boolean(settings?.workspace_watermark_enabled??settings?.watermark_enabled??1),
