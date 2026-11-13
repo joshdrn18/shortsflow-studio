@@ -359,118 +359,55 @@ function localDayKey(timeZone,date=new Date()) {
   const values=Object.fromEntries(parts.map(part=>[part.type,part.value]));
   return values.year+"-"+values.month+"-"+values.day;
 }
-async function fetchArticleEvidence(item) {
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),6500);
-  try {
-    const response=await fetch(item.link,{redirect:"follow",signal:controller.signal,headers:{"user-agent":"Mozilla/5.0 (compatible; ShortsFlowResearch/1.0; +https://shortsflow-studio.pages.dev)","accept":"text/html,application/xhtml+xml"}});
-    if(!response.ok)return null;
-    const contentType=response.headers.get("content-type")||"";
-    if(!/text\/html|application\/xhtml/i.test(contentType)||!response.body)return null;
-    const reader=response.body.getReader(),chunks=[];
-    let total=0;
-    while(total<280000) {
-      const part=await reader.read();
-      if(part.done)break;
-      const remaining=280000-total;
-      const value=part.value.byteLength>remaining?part.value.slice(0,remaining):part.value;
-      chunks.push(value);total+=value.byteLength;
-      if(value.byteLength<part.value.byteLength){try{await reader.cancel();}catch{}break;}
-    }
-    const bytes=new Uint8Array(total);
-    let offset=0;
-    for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
-    const html=new TextDecoder().decode(bytes);
-    const meta={};
-    const tags=html.match(/<meta\b[^>]*>/gi)||[];
-    for(const tag of tags) {
-      const name=(tag.match(/\b(?:name|property)=["']([^"']+)["']/i)||[])[1]||"";
-      const value=(tag.match(/\bcontent=["']([^"']+)["']/i)||[])[1]||"";
-      if(name&&value)meta[name.toLowerCase()]=autoDecodeXml(value);
-    }
-    const body=html.replace(/<(script|style|noscript|svg|nav|footer|header|aside|form|iframe)[^>]*>[\s\S]*?<\/\1>/gi," ");
-    const paragraphs=(body.match(/<p\b[^>]*>[\s\S]*?<\/p>/gi)||[])
-      .map(value=>autoDecodeXml(value))
-      .filter(value=>value.length>=70&&!/(cookie preference|accept all cookies|subscribe to our newsletter|sign in to continue|all rights reserved|advertisement)/i.test(value));
-    const uniqueParagraphs=[...new Set(paragraphs)];
-    const excerpt=uniqueParagraphs.slice(0,9).join(" ").slice(0,3600);
-    const description=(meta["og:description"]||meta.description||meta["twitter:description"]||"").slice(0,1000);
-    const evidence=excerpt.length>=260?excerpt:description.length>=180?description:"";
-    if(evidence.length<180)return null;
-    return {
-      ...item,
-      article_url:response.url||item.link,
-      article_excerpt:evidence,
-      evidence_level:excerpt.length>=260?"article_text_excerpt":"publisher_meta_description"
-    };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+
 async function discoverAutopilotSources() {
-  const queries=["technology science innovation when:3d","gaming esports video games when:3d","basketball sports viral moments when:3d","internet culture entertainment when:3d"];
-  const feeds=await Promise.all(queries.map(async query=>{
-    const url="https://news.google.com/rss/search?q="+encodeURIComponent(query)+"&hl=en-US&gl=US&ceid=US:en";
-    const response=await fetch(url,{headers:{"user-agent":"ShortsFlowAutopilot/1.0"}});
-    if(!response.ok)return [];
-    const xml=await response.text();
-    return xml.split("<item>").slice(1).map(part=>{
-      const block=part.split("</item>")[0],rawTitle=autoXmlField(block,"title"),titleParts=rawTitle.split(" - "),link=autoXmlField(block,"link");
-      return {
-        title:titleParts.length>1?titleParts.slice(0,-1).join(" - "):rawTitle,
-        source:titleParts.length>1?titleParts.at(-1):"News source",
-        link:/^https?:\/\//i.test(link)?link:"",
-        published:autoXmlField(block,"pubDate"),
-        summary:autoXmlField(block,"description").slice(0,700)
-      };
-    }).filter(item=>item.title&&item.link);
+  const feeds=[
+    {url:"https://techcrunch.com/feed/",name:"TechCrunch",niche:"Technology"},
+    {url:"https://www.sciencedaily.com/rss/top/science.xml",name:"ScienceDaily",niche:"Science"},
+    {url:"https://www.engadget.com/rss.xml",name:"Engadget",niche:"Technology"},
+    {url:"https://www.wired.com/feed/rss",name:"WIRED",niche:"Technology and culture"},
+    {url:"https://www.nasa.gov/feed/",name:"NASA",niche:"Space and science"}
+  ];
+  const now=Date.now(),minDate=now-7*86400000;
+  const feedsFound=await Promise.all(feeds.map(async feed=>{
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),5500);
+    try {
+      const response=await fetch(feed.url,{signal:controller.signal,headers:{
+        "user-agent":"Mozilla/5.0 (compatible; ShortsFlowResearch/1.0)",
+        "accept":"application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8"
+      }});
+      if(!response.ok)return [];
+      const xml=await response.text();
+      const blocks=xml.includes("<item")?xml.split(/<item(?:\s[^>]*)?>/i).slice(1).map(part=>part.split(/<\/item>/i)[0]):[];
+      return blocks.map(block=>{
+        const title=autoXmlField(block,"title");
+        const link=autoXmlField(block,"link")||((block.match(/<link[^>]+href=["']([^"']+)["']/i)||[])[1]||"");
+        const published=autoXmlField(block,"pubDate")||autoXmlField(block,"published")||autoXmlField(block,"updated");
+        const raw=autoXmlField(block,"content:encoded")||autoXmlField(block,"description")||autoXmlField(block,"summary");
+        const excerpt=autoDecodeXml(raw).replace(/\s+/g," ").trim().slice(0,3800);
+        const timestamp=Date.parse(published);
+        if(!title||!/^https?:\/\//i.test(link)||excerpt.length<160||!Number.isFinite(timestamp)||timestamp<minDate||timestamp>now+86400000)return null;
+        return {title,source:feed.name,niche:feed.niche,link,published,article_url:link,article_excerpt:excerpt,evidence_level:"publisher_rss_excerpt"};
+      }).filter(Boolean);
+    } catch(error) {
+      console.warn("autopilot_feed_unavailable",feed.name,String(error?.message||error).slice(0,180));
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
   }));
   const unique=new Map();
-  for(const item of feeds.flat()) {
+  for(const item of feedsFound.flat()) {
     const key=item.title.toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
     if(key&&!unique.has(key))unique.set(key,item);
   }
-  const candidates=[...unique.values()].slice(0,12);
-  const enriched=await Promise.all(candidates.map(fetchArticleEvidence));
-  return enriched.filter(Boolean).slice(0,8);
+  return [...unique.values()].sort((a,b)=>Date.parse(b.published)-Date.parse(a.published)).slice(0,12);
 }
 
-
-async function translateAutopilotSubtitles(env,job,scenes) {
-  const input=scenes.map(scene=>({scene:scene.scene,english:scene.narration}));
-  const system=[
-    "You are a professional English-to-Indonesian subtitle translator.",
-    "Translate each full English spoken line into natural, fluent Bahasa Indonesia.",
-    "Return a complete sentence or natural spoken phrase, not a label, topic, slug, keyword, filename, or identifier.",
-    "Never return underscores, IDs, or shortened names in place of a translation. Preserve the meaning, facts, numbers, proper names, and tone.",
-    "Keep each translation concise enough for a 40–50 second vertical video. Do not add new facts.",
-    "Return only JSON in the exact shape: {\"translations\":[{\"scene\":1,\"text\":\"Kalimat terjemahan Bahasa Indonesia yang lengkap.\"}]}"
-  ].join(" ");
-  const prompt="Translate the following narration lines into Bahasa Indonesia. Return exactly one translation for each scene and preserve the scene numbers:\n"+JSON.stringify(input);
-  if(!await reserveTextBudget(env,"autopilot-translation:"+job.id,Math.ceil((system.length+prompt.length)/3),700)) {
-    throw new Error("Daily Workers AI safety budget reached before subtitle translation.");
-  }
-  const inference=await env.AI.run(CLIP_MODEL,{
-    messages:[{role:"system",content:system},{role:"user",content:prompt}],
-    max_tokens:700,temperature:0.1,response_format:{type:"json_object"}
-  });
-  const translated=parseAutopilotJson(inference);
-  const rows=Array.isArray(translated?.translations)?translated.translations:[];
-  const byScene=new Map(rows.map(row=>[Number(row.scene),textSafe(row.text,350)]));
-  return scenes.map(scene=>{
-    const value=byScene.get(Number(scene.scene))||"";
-    const words=value.split(/\s+/).filter(Boolean);
-    if(value.length<24||words.length<5||words.length>24||/_/.test(value)||/^[a-z0-9_-]+$/i.test(value)) {
-      throw new Error("Subtitle translation QA failed for scene "+scene.scene+". A full Indonesian sentence was not returned.");
-    }
-    return {...scene,subtitle_indonesian:value};
-  });
-}
 async function generateAutopilotScript(env,job,bucket) {
   const sources=await discoverAutopilotSources();
-  if(sources.length<3)throw new Error("Fewer than three recent publisher articles could be verified. This slot was skipped rather than inventing a trend.");
+  if(sources.length<1)throw new Error("No recent publisher RSS article with a substantive excerpt could be verified. This slot was skipped.");
   const previous=await env.DB.prepare("SELECT title,topic FROM autopilot_jobs WHERE workspace_id=? AND created_at>? ORDER BY created_at DESC LIMIT 20")
     .bind(job.workspace_id,new Date(Date.now()-30*86400000).toISOString()).all();
   const avoid=(previous.results||[]).map(item=>item.title+" — "+item.topic).join("\n");
@@ -486,7 +423,7 @@ async function generateAutopilotScript(env,job,bucket) {
     "You are the editorial producer for a professional original YouTube Shorts channel.",
     "Create one compelling 40–50 second mini-documentary from a single specific current story with strong audience interest and a clear factual payoff. Optimize for curiosity, retention and shareability; never promise virality or invent popularity signals.",
     "The supplied material includes actual publisher article text excerpts, not just headlines. Use only facts explicitly supported by those excerpts. Do not invent statistics, quotations, dates, results, causes, locations, identities, or context. If the excerpts do not support a coherent story, return {\"skip\":true,\"skip_reason\":\"article evidence is insufficient\"}.",
-    "Choose one story only. You may use at most two sources, and they must discuss the same story. Do not combine unrelated headlines into a generic global roundup.",
+    "Choose exactly one supplied publisher article as the source for this Short. Do not combine unrelated stories or claim facts beyond that article excerpt.",
     "Every factual scene must be traceable to one or more supplied source IDs. The source_notes array must contain objects with numeric source_id and a short used_for description. Each scene must include source_ids as an array of those same numeric IDs.",
     "Narration is English, natural to speak and suitable for a global audience. Do not return translations in this script; subtitles are generated separately by a dedicated translator.",
     "Use exactly four scenes. Each scene needs a concrete factual narration, an original cinematic visual prompt, and brief on_screen_text of at most 6 words.",
