@@ -447,6 +447,60 @@ async function makeAutopilotReport(env,workspaceId,dayKey) {
   return report;
 }
 
+
+async function processAutopilot(env) {
+  const bucket=env.SOURCE_MEDIA||env.MEDIA;
+  if(!env.DB||!env.AI||!bucket)return;
+  const settings=await env.DB.prepare("SELECT s.* FROM autopilot_settings s JOIN youtube_connections y ON y.workspace_id=s.workspace_id WHERE s.enabled=1 ORDER BY s.updated_at ASC LIMIT 1").first();
+  if(!settings)return;
+  const workspaceId=settings.workspace_id,dayKey=localDayKey(settings.timezone);
+  await makeAutopilotReport(env,workspaceId,dayKey);
+  let job=await env.DB.prepare("SELECT * FROM autopilot_jobs WHERE workspace_id=? AND status IN ('queued','generating','generating_scenes') ORDER BY created_at LIMIT 1").bind(workspaceId).first();
+  if(!job) {
+    const attempted=await env.DB.prepare("SELECT COUNT(*) AS total FROM autopilot_jobs WHERE workspace_id=? AND day_key=?").bind(workspaceId,dayKey).first();
+    if(Number(attempted?.total||0)>=Math.min(5,Math.max(1,Number(settings.daily_target||3))))return;
+    const blocked=await env.DB.prepare("SELECT COUNT(*) AS total FROM autopilot_jobs WHERE workspace_id=? AND status IN ('render_queued','rendering','queued_publish')").bind(workspaceId).first();
+    if(Number(blocked?.total||0)>0)return;
+    const now=new Date().toISOString(),id=crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO autopilot_jobs (id,workspace_id,day_key,status,voice_language,subtitle_language,created_at,updated_at) VALUES (?,?,?,'queued','en','id',?,?)").bind(id,workspaceId,dayKey,now,now).run();
+    job=await env.DB.prepare("SELECT * FROM autopilot_jobs WHERE id=?").bind(id).first();
+  }
+  try {
+    if(job.status==="queued") {
+      await env.DB.prepare("UPDATE autopilot_jobs SET status='generating',updated_at=? WHERE id=? AND status='queued'").bind(new Date().toISOString(),job.id).run();
+      job=await env.DB.prepare("SELECT * FROM autopilot_jobs WHERE id=?").bind(job.id).first();
+      await generateAutopilotScript(env,job,bucket);
+      return;
+    }
+    if(job.status==="generating_scenes") {
+      const scenes=JSON.parse(job.scenes_json||"[]"),next=scenes.find(scene=>!scene.image_key);
+      if(!next) {
+        await env.DB.prepare("UPDATE autopilot_jobs SET status='render_queued',updated_at=? WHERE id=? AND status='generating_scenes'").bind(new Date().toISOString(),job.id).run();
+        return;
+      }
+      const flux=await env.AI.run("@cf/black-forest-labs/flux-1-schnell",{
+        prompt:textSafe(next.visual_prompt,1800)+" — vertical 9:16 original documentary illustration, cinematic natural lighting, no text, no logos, no watermark.",
+        steps:4,seed:Math.floor(Math.random()*2147483647)
+      });
+      if(!flux?.image)throw new Error("Image model returned no generated image.");
+      const binary=Uint8Array.from(atob(flux.image),char=>char.charCodeAt(0));
+      if(!binary.byteLength||binary.byteLength>12*1024*1024)throw new Error("Generated scene image is empty or too large.");
+      const key="workspaces/"+workspaceId+"/autopilot/"+job.id+"/scene-"+next.scene+".jpg";
+      await bucket.put(key,binary,{httpMetadata:{contentType:"image/jpeg"},customMetadata:{workspaceId,autopilotJobId:job.id,scene:String(next.scene)}});
+      const updatedScenes=scenes.map(scene=>scene.scene===next.scene?{...scene,image_key:key}:scene);
+      const done=updatedScenes.every(scene=>scene.image_key);
+      await env.DB.prepare("UPDATE autopilot_jobs SET scenes_json=?,next_scene_number=?,status=?,updated_at=? WHERE id=? AND status='generating_scenes'")
+        .bind(JSON.stringify(updatedScenes),done?5:next.scene+1,done?"render_queued":"generating_scenes",new Date().toISOString(),job.id).run();
+      return;
+    }
+  } catch(error) {
+    const message=String(error?.message||"Autopilot production failed.").slice(0,900);
+    await env.DB.prepare("UPDATE autopilot_jobs SET status='failed',last_error=?,updated_at=? WHERE id=? AND status IN ('generating','generating_scenes','queued')")
+      .bind(message,new Date().toISOString(),job.id).run();
+    console.error("autopilot_generation_failed",job.id,message);
+  }
+}
+
 async function processNextJob(env) {
   // Pages uses MEDIA while the standalone Worker may use SOURCE_MEDIA.
   const sourceBucket = env.SOURCE_MEDIA || env.MEDIA;
@@ -1227,6 +1281,6 @@ export default {
   },
 
   async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(Promise.all([processNextJob(env), processYoutubeJob(env)]));
+    ctx.waitUntil(Promise.all([processNextJob(env), processYoutubeJob(env), processAutopilot(env)]));
   }
 };
