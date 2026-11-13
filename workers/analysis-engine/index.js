@@ -318,6 +318,62 @@ async function ensureTranscript(env, job, payload) {
   return { id, transcript_text: "", segments_json: "[]" };
 }
 
+
+function autoDecodeXml(value) {
+  return String(value || "").replace(/<[^>]*>/g," ").replace(/&amp;/g,"&").replace(/&quot;/g,'"')
+    .replace(/&#39;/g,"'").replace(/&apos;/g,"'").replace(/&lt;/g,"<").replace(/&gt;/g,">")
+    .replace(/\s+/g," ").trim();
+}
+function autoXmlField(block,name) {
+  const re=new RegExp("<"+name+"(?:\\s[^>]*)?>([\\s\\S]*?)</"+name+">","i");
+  const match=String(block||"").match(re);
+  return match?autoDecodeXml(match[1]):"";
+}
+function textSafe(value,max) { return String(value??"").replace(/\s+/g," ").trim().slice(0,max); }
+function parseAutopilotScript(result) {
+  const candidates=[result?.response,result?.output_text,result?.result,result?.text];
+  for(const candidate of candidates) {
+    if(candidate&&typeof candidate==="object"&&!Array.isArray(candidate)) {
+      if(candidate.script&&typeof candidate.script==="object")return candidate.script;
+      if(candidate.title&&Array.isArray(candidate.scenes))return candidate;
+    }
+    const raw=String(candidate||"").trim().replace(/^\x60\x60\x60(?:json)?\s*/i,"").replace(/\s*\x60\x60\x60$/i,"");
+    const first=raw.indexOf("{"),last=raw.lastIndexOf("}");
+    if(first>=0&&last>first) {
+      try {
+        const parsed=JSON.parse(raw.slice(first,last+1));
+        if(parsed?.script)return parsed.script;
+        if((parsed?.title&&Array.isArray(parsed.scenes))||parsed?.skip===true)return parsed;
+      } catch {}
+    }
+  }
+  throw new Error("Autopilot writer did not return valid JSON.");
+}
+function localDayKey(timeZone,date=new Date()) {
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:timeZone||"Asia/Kuala_Lumpur",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(date);
+  const values=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+  return values.year+"-"+values.month+"-"+values.day;
+}
+async function discoverAutopilotSources() {
+  const queries=["technology science innovation when:3d","gaming esports video games when:3d","basketball sports viral moments when:3d","internet culture entertainment when:3d"];
+  const feeds=await Promise.all(queries.map(async query=>{
+    const url="https://news.google.com/rss/search?q="+encodeURIComponent(query)+"&hl=en-US&gl=US&ceid=US:en";
+    const response=await fetch(url,{headers:{"user-agent":"ShortsFlowAutopilot/1.0"}});
+    if(!response.ok)return [];
+    const xml=await response.text();
+    return xml.split("<item>").slice(1).map(part=>{
+      const block=part.split("</item>")[0],rawTitle=autoXmlField(block,"title"),titleParts=rawTitle.split(" - "),link=autoXmlField(block,"link");
+      return {title:titleParts.length>1?titleParts.slice(0,-1).join(" - "):rawTitle,source:titleParts.length>1?titleParts.at(-1):"News source",link:/^https?:\/\//i.test(link)?link:"",published:autoXmlField(block,"pubDate"),summary:autoXmlField(block,"description").slice(0,700)};
+    }).filter(item=>item.title&&item.link);
+  }));
+  const unique=new Map();
+  for(const item of feeds.flat()) {
+    const key=item.title.toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+    if(key&&!unique.has(key))unique.set(key,item);
+  }
+  return [...unique.values()].slice(0,16);
+}
+
 async function processNextJob(env) {
   // Pages uses MEDIA while the standalone Worker may use SOURCE_MEDIA.
   const sourceBucket = env.SOURCE_MEDIA || env.MEDIA;
