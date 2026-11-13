@@ -374,6 +374,79 @@ async function discoverAutopilotSources() {
   return [...unique.values()].slice(0,16);
 }
 
+
+async function generateAutopilotScript(env,job,bucket) {
+  const sources=await discoverAutopilotSources();
+  if(sources.length<3)throw new Error("Not enough recent source material; this slot was skipped rather than inventing a trend.");
+  const previous=await env.DB.prepare("SELECT title,topic FROM autopilot_jobs WHERE workspace_id=? AND created_at>? ORDER BY created_at DESC LIMIT 20")
+    .bind(job.workspace_id,new Date(Date.now()-30*86400000).toISOString()).all();
+  const avoid=(previous.results||[]).map(item=>item.title+" — "+item.topic).join("\n");
+  const sourceBrief=sources.map((item,index)=>"["+(index+1)+"] "+item.title+" | "+item.source+" | "+item.published+" | "+item.summary+" | "+item.link).join("\n");
+  const system=[
+    "You are the editorial producer for an original YouTube Shorts channel.",
+    "Create a highly engaging but factually conservative 40–50 second mini-documentary from current source material.",
+    "Choose the strongest single story using freshness, clear audience interest, emotional curiosity, and a concrete payoff. Never claim anything is guaranteed viral.",
+    "Use only facts directly supported by supplied source titles and summaries. Do not invent quotes, statistics, scores, dates, names, causes, or details. If evidence is insufficient, return {\"skip\":true,\"skip_reason\":\"insufficient source evidence\"}.",
+    "Narration must be natural English for a global audience. Every scene also needs concise, accurate Bahasa Indonesia translation for burned-in subtitles.",
+    "Use exactly four scenes. Each scene needs English narration, Indonesian translation, and a distinct original cinematic image prompt.",
+    "Visual prompts must describe original AI-generated illustrative footage only. Do not recreate copyrighted clips, named creators, celebrities, logos, broadcast footage, or recognizable fictional characters. No words, text, logos, subtitles, or watermarks inside images.",
+    "Write a first-two-second hook, keep narration speakable, and end with a satisfying factual payoff. Avoid generic clickbait and engagement bait.",
+    "Return a JSON object with title, niche, topic, hook, narration, caption, hashtags, source_notes, scenes. Each scene: scene, narration, subtitle_id, visual_prompt, on_screen_text. No markdown."
+  ].join(" ");
+  const prompt="RECENT NEWS AND TREND LEADS (use only evidence provided; links are for attribution):\n"+sourceBrief+
+    "\n\nRECENT CHANNEL TOPICS TO AVOID REPEATING:\n"+(avoid||"None.")+
+    "\n\nCreate one original Short. Voice: English. Subtitles: Bahasa Indonesia. Target length: about 45 seconds. Return compact valid JSON only.";
+  if(!await reserveTextBudget(env,"autopilot-script:"+job.id,Math.ceil((system.length+prompt.length)/3),1500))throw new Error("Daily Workers AI safety budget reached.");
+  const inference=await env.AI.run(CLIP_MODEL,{messages:[{role:"system",content:system},{role:"user",content:prompt}],max_tokens:1800,temperature:0.2,response_format:{type:"json_object"}});
+  const script=parseAutopilotScript(inference);
+  if(script.skip)throw new Error(String(script.skip_reason||"Source evidence was not strong enough."));
+  if(!script.title||!script.narration||!Array.isArray(script.scenes)||script.scenes.length<4)throw new Error("Generated Short script is incomplete.");
+  const scenes=script.scenes.slice(0,4).map((scene,index)=>({
+    scene:index+1,narration:textSafe(scene.narration,500),subtitle_id:textSafe(scene.subtitle_id,500),
+    visual_prompt:textSafe(scene.visual_prompt,1800),on_screen_text:textSafe(scene.on_screen_text,60),image_key:null
+  }));
+  if(scenes.some(scene=>!scene.narration||!scene.subtitle_id||!scene.visual_prompt))throw new Error("Scene is missing narration, translation, or visual direction.");
+  const narration=scenes.map(scene=>scene.narration).join(" ");
+  if(narration.length<220||narration.length>1900)throw new Error("Narration length is outside the safe 40–50 second range.");
+  const voiceResult=await env.AI.run("@cf/deepgram/aura-2-en",{text:narration,speaker:"luna",encoding:"mp3"});
+  let audioBytes;
+  if(voiceResult instanceof ReadableStream)audioBytes=await new Response(voiceResult).arrayBuffer();
+  else if(voiceResult?.audio instanceof ReadableStream)audioBytes=await new Response(voiceResult.audio).arrayBuffer();
+  else if(voiceResult?.audio instanceof ArrayBuffer)audioBytes=voiceResult.audio;
+  else if(voiceResult?.audio instanceof Uint8Array)audioBytes=voiceResult.audio.buffer.slice(voiceResult.audio.byteOffset,voiceResult.audio.byteOffset+voiceResult.audio.byteLength);
+  else throw new Error("English voice generation returned no playable audio.");
+  if(!audioBytes.byteLength||audioBytes.byteLength>18*1024*1024)throw new Error("Generated voice audio is empty or too large.");
+  const audioKey="workspaces/"+job.workspace_id+"/autopilot/"+job.id+"/voice.mp3";
+  await bucket.put(audioKey,audioBytes,{httpMetadata:{contentType:"audio/mpeg"},customMetadata:{workspaceId:job.workspace_id,autopilotJobId:job.id}});
+  const output={
+    title:textSafe(script.title,100),niche:textSafe(script.niche,80)||"Trending stories",
+    topic:textSafe(script.topic,180),hook:textSafe(script.hook,260),narration,
+    caption:textSafe(script.caption,1200),
+    hashtags:Array.isArray(script.hashtags)?script.hashtags.slice(0,8).map(x=>textSafe(x,50)):[],
+    source_notes:Array.isArray(script.source_notes)?script.source_notes.slice(0,8):[],scenes
+  };
+  const now=new Date().toISOString();
+  await env.DB.prepare("UPDATE autopilot_jobs SET status='generating_scenes',niche=?,topic=?,title=?,hook=?,narration=?,voice_language='en',subtitle_language='id',script_json=?,sources_json=?,audio_key=?,scenes_json=?,next_scene_number=1,duration_seconds=45,updated_at=? WHERE id=? AND status='generating'")
+    .bind(output.niche,output.topic,output.title,output.hook,narration,JSON.stringify(output),JSON.stringify(sources),audioKey,JSON.stringify(scenes),now,job.id).run();
+}
+async function makeAutopilotReport(env,workspaceId,dayKey) {
+  const rows=await env.DB.prepare("SELECT id,title,topic,status,platform_url,platform_video_id,last_error,created_at,published_at FROM autopilot_jobs WHERE workspace_id=? AND day_key=? ORDER BY created_at")
+    .bind(workspaceId,dayKey).all();
+  const jobs=rows.results||[];
+  const report={
+    date:dayKey,
+    produced:jobs.filter(j=>["render_queued","rendering","queued_publish","published"].includes(j.status)).length,
+    published:jobs.filter(j=>j.status==="published").length,
+    failed:jobs.filter(j=>j.status==="failed").length,
+    pending:jobs.filter(j=>["queued","generating","generating_scenes","render_queued","rendering","queued_publish"].includes(j.status)).length,
+    videos:jobs.map(j=>({title:j.title,topic:j.topic,status:j.status,url:j.platform_url||null,error:j.last_error||null,createdAt:j.created_at,publishedAt:j.published_at||null}))
+  };
+  const now=new Date().toISOString();
+  await env.DB.prepare("INSERT INTO autopilot_daily_reports (workspace_id,report_date,produced_count,published_count,failed_count,pending_count,report_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id,report_date) DO UPDATE SET produced_count=excluded.produced_count,published_count=excluded.published_count,failed_count=excluded.failed_count,pending_count=excluded.pending_count,report_json=excluded.report_json,updated_at=excluded.updated_at")
+    .bind(workspaceId,dayKey,report.produced,report.published,report.failed,report.pending,JSON.stringify(report),now,now).run();
+  return report;
+}
+
 async function processNextJob(env) {
   // Pages uses MEDIA while the standalone Worker may use SOURCE_MEDIA.
   const sourceBucket = env.SOURCE_MEDIA || env.MEDIA;
