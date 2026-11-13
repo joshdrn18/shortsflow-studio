@@ -137,6 +137,7 @@ async function processYoutubeJob(env) {
        WHERE id=? AND status='publishing'
        AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.clip_id=clips.id AND p.platform='youtube' AND p.status IN ('queued','uploading','processing','published'))`).bind(failedAt,job.clip_id)
     ]);
+    await env.DB.prepare("UPDATE autopilot_jobs SET status='failed',last_error=?,updated_at=? WHERE publishing_job_id=? AND status<>'published'").bind(message,failedAt,job.id).run();
     console.error("youtube_upload_failed",job.id,message);
   }
 }
