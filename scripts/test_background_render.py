@@ -8,7 +8,43 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from background_render import render
+from background_render import render, render_autopilot, probe_media
+
+
+def test_autopilot_render(root):
+    audio = root / "autopilot-voice.mp3"
+    output = root / "autopilot-output.mp4"
+    subprocess.run([
+        "ffmpeg","-hide_banner","-loglevel","error","-y",
+        "-f","lavfi","-i","sine=frequency=440:duration=16",
+        "-c:a","libmp3lame","-b:a","96k",str(audio)
+    ],check=True,timeout=60)
+    colors = ["red","blue","green","yellow"]
+    images = []
+    scenes = []
+    for index,color in enumerate(colors,1):
+        image = root / f"autopilot-scene-{index}.jpg"
+        subprocess.run([
+            "ffmpeg","-hide_banner","-loglevel","error","-y",
+            "-f","lavfi","-i",f"color=c={color}:s=720x1280:r=30",
+            "-frames:v","1","-update","1",str(image)
+        ],check=True,timeout=30)
+        images.append(image)
+        scenes.append({
+            "scene":index,
+            "narration":f"This is original scene number {index} in a simple video render validation.",
+            "subtitle":f"Ini adalah adegan asli nomor {index} dalam uji render video."
+        })
+    job = {
+        "id":"autopilot-render-test",
+        "scenes":scenes,
+        "watermark":{"enabled":True,"text":"@Clippers2K26","position":"center","opacity":0.55,"scale":"small"}
+    }
+    size,duration = render_autopilot(job,images,audio,output,root)
+    measured = probe_media(output)
+    if size < 1024 or not 15 <= duration <= 60 or abs(measured-duration) > 0.5:
+        raise SystemExit(f"Autopilot test output is invalid: size={size}, duration={duration}, measured={measured}")
+    print(f"OK: autopilot FFmpeg produced 1080x1920 H.264/AAC with Indonesian subtitles and watermark ({size} bytes, {duration:.1f}s).")
 
 def main():
     with tempfile.TemporaryDirectory(prefix="shortsflow-render-test-") as temp:
@@ -52,6 +88,7 @@ def main():
         if not audio or audio.get("codec_name") != "aac":
             raise SystemExit(f"Background render output has invalid audio stream: {audio}")
         print(f"OK: FFmpeg background pipeline rendered 1080x1920 H.264/AAC MP4 ({size} bytes).")
+        test_autopilot_render(root)
 
 if __name__ == "__main__":
     main()
