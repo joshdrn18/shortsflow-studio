@@ -668,7 +668,7 @@ async function generateAutopilotScript(env,job,bucket) {
     const keys=script&&typeof script==="object"?Object.keys(script).slice(0,16).join(","):"not-an-object";
     throw new Error("Generated Short script is missing title, topic, or narration (fields: "+keys+").");
   }
-  const allowedIds=new Set(sources.map((source,index)=>index+1));
+  const allowedIds=new Set(selectedResearch.map((source,index)=>index+1));
   const sourceNotes=(Array.isArray(script.source_notes)?script.source_notes:[])
     .filter(note=>Number.isInteger(Number(note.source_id))&&allowedIds.has(Number(note.source_id)))
     .slice(0,1)
@@ -717,7 +717,7 @@ async function generateAutopilotScript(env,job,bucket) {
   const narration=scenes.map(scene=>scene.narration).join(" ");
   const spokenWordCount=narration.split(/\s+/).filter(Boolean).length;
   if(spokenWordCount<80||spokenWordCount>125||narration.length>1900)throw new Error("Narration length QA failed: expected 80–125 spoken words, received "+spokenWordCount+".");
-  const selectedSources=sources.filter((source,index)=>selectedIds.has(index+1));
+  const selectedSources=selectedResearch.filter((source,index)=>selectedIds.has(index+1));
   const sourceCorpus=selectedSources.map(source=>source.title+" "+source.article_excerpt).join(" ").toLowerCase();
   validateAutopilotNarrationAnchors(narration,sourceCorpus);
   const numericClaims=narration.match(/\b\d[\d,]*(?:\.\d+)?\b/g)||[];
