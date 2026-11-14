@@ -776,6 +776,9 @@ async function processAutopilot(env) {
   const settings=await env.DB.prepare("SELECT s.* FROM autopilot_settings s JOIN youtube_connections y ON y.workspace_id=s.workspace_id WHERE s.enabled=1 ORDER BY s.updated_at ASC LIMIT 1").first();
   if(!settings)return;
   const workspaceId=settings.workspace_id,dayKey=localDayKey(settings.timezone);
+  const utcDate=new Date().toISOString().slice(0,10);
+  const quotaPause=await env.DB.prepare("SELECT updated_at FROM autopilot_jobs WHERE workspace_id=? AND status='failed' AND last_error LIKE '%daily free allocation of 10,000 neurons%' ORDER BY updated_at DESC LIMIT 1").bind(workspaceId).first();
+  if(quotaPause&&String(quotaPause.updated_at||"").slice(0,10)===utcDate)return;
   await makeAutopilotReport(env,workspaceId,dayKey);
   let job=await env.DB.prepare("SELECT * FROM autopilot_jobs WHERE workspace_id=? AND status IN ('queued','generating','generating_scenes') ORDER BY created_at LIMIT 1").bind(workspaceId).first();
   if(!job) {
@@ -825,6 +828,10 @@ async function processAutopilot(env) {
     const message=String(error?.message||"Autopilot production failed.").slice(0,900);
     await env.DB.prepare("UPDATE autopilot_jobs SET status='failed',last_error=?,updated_at=? WHERE id=? AND status IN ('generating','generating_scenes','queued')")
       .bind(message,new Date().toISOString(),job.id).run();
+    if(/4006|daily free allocation of 10,000 neurons/i.test(message)){
+      try{await makeAutopilotReport(env,workspaceId,dayKey);}catch(reportError){}
+      console.warn("autopilot_paused_workers_ai_daily_quota",workspaceId,utcDate);
+    }
     console.error("autopilot_generation_failed",job.id,message);
   }
 }
