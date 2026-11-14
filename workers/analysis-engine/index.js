@@ -122,7 +122,6 @@ async function processYoutubeJob(env) {
       env.DB.prepare("UPDATE clips SET status='published',updated_at=? WHERE id=?").bind(completedAt,job.clip_id),
       env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) SELECT ?,c.workspace_id,'clip',c.id,'youtube.published',?,? FROM clips c WHERE c.id=?").bind(crypto.randomUUID(),JSON.stringify({jobId:job.id,videoId:result.id,renderAssetId:job.render_asset_id}),completedAt,job.clip_id),
       env.DB.prepare("UPDATE autopilot_jobs SET status='published',platform_video_id=?,platform_url=?,published_at=?,updated_at=?,last_error=NULL WHERE publishing_job_id=?").bind(result.id,"https://www.youtube.com/shorts/"+result.id,completedAt,completedAt,job.id),
-      env.DB.prepare("UPDATE autopilot_settings SET privacy_status='public',daily_target=3,updated_at=? WHERE enabled=1 AND workspace_id=(SELECT workspace_id FROM autopilot_jobs WHERE publishing_job_id=?)").bind(completedAt,job.id)
     ]);
   } catch (error) {
     const message=String(error?.message || "YouTube upload failed.").slice(0,1000);
@@ -1653,7 +1652,7 @@ async function handleAutopilotRender(request,env,url){
   const description=[String(script.caption||""),String(Array.isArray(script.hashtags)?script.hashtags.join(" "):""),sourceText?"Sources:\n"+sourceText:""].filter(Boolean).join("\n\n").slice(0,5000);
   const tags=[...(Array.isArray(script.hashtags)?script.hashtags:[]),"Shorts"].map(x=>String(x).replace(/^#/,"").trim()).filter(Boolean).slice(0,30);
   const settings=await env.DB.prepare("SELECT privacy_status FROM autopilot_settings WHERE workspace_id=?").bind(job.workspace_id).first();
-  const privacy=["public","unlisted","private"].includes(settings?.privacy_status)?settings.privacy_status:"public";
+  const privacy=["public","unlisted","private"].includes(settings?.privacy_status)?settings.privacy_status:"private";
   const title=String(script.title||job.title||"Original Short").slice(0,100);
   try{
    const result=await env.DB.batch([
