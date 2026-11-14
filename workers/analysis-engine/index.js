@@ -2,7 +2,7 @@ const MODEL = "@cf/openai/whisper";
 const CLIP_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
 const CHUNK_SECONDS = 60;
 const MAX_SOURCE_SECONDS = 1800;
-const DAILY_NEURON_BUDGET = 8000;
+const DAILY_NEURON_BUDGET = 3500; // Reserve room for other Cloudflare AI projects on this account.
 const NEURONS_PER_AUDIO_MINUTE = 41.14;
 const LOCK_SECONDS = 600;
 
