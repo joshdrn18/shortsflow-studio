@@ -264,30 +264,32 @@ async function retryTransientJob(env, job, message) {
   return true;
 }
 
-async function reserveAiBudget(env, reservationKey, seconds) {
+async function reserveNeuronBudget(env, reservationKey, neurons, audioSeconds = 0) {
   const usageDate = new Date().toISOString().slice(0, 10);
-  const neurons = (seconds / 60) * NEURONS_PER_AUDIO_MINUTE;
+  const safeNeurons = Math.max(0, Number(neurons) || 0);
+  const safeAudioSeconds = Math.max(0, Math.ceil(Number(audioSeconds) || 0));
+  const datedKey = usageDate + ":" + reservationKey;
   const now = new Date().toISOString();
   await env.DB.prepare(
-    "INSERT OR IGNORE INTO ai_usage_reservations (reservation_key, usage_date, neurons, audio_seconds, created_at) VALUES (?, ?, ?, ?, ?)"
-  ).bind(reservationKey, usageDate, neurons, Math.ceil(seconds), now).run();
+    `INSERT OR IGNORE INTO ai_usage_reservations (reservation_key, usage_date, neurons, audio_seconds, created_at)
+     SELECT ?, ?, ?, ?, ?
+     WHERE (SELECT COALESCE(SUM(neurons), 0) FROM ai_usage_reservations WHERE usage_date = ?) + ? <= ?`
+  ).bind(datedKey, usageDate, safeNeurons, safeAudioSeconds, now, usageDate, safeNeurons, DAILY_NEURON_BUDGET).run();
   const reservation = await env.DB.prepare(
-    "SELECT reservation_key FROM ai_usage_reservations WHERE reservation_key = ?"
-  ).bind(reservationKey).first();
+    "SELECT reservation_key FROM ai_usage_reservations WHERE reservation_key = ? AND usage_date = ?"
+  ).bind(datedKey, usageDate).first();
   return Boolean(reservation);
 }
 
+async function reserveAiBudget(env, reservationKey, seconds) {
+  const neurons = (Math.max(0, Number(seconds) || 0) / 60) * NEURONS_PER_AUDIO_MINUTE;
+  return reserveNeuronBudget(env, reservationKey, neurons, seconds);
+}
+
 async function reserveTextBudget(env, reservationKey, inputTokens, outputTokens) {
-  const usageDate = new Date().toISOString().slice(0, 10);
+  // Current Llama 3.1 8B FP8 Fast pricing: 4,119 input and 34,868 output neurons per million tokens.
   const neurons = (Math.max(0, inputTokens) * 4119 + Math.max(0, outputTokens) * 34868) / 1000000 + 20;
-  const now = new Date().toISOString();
-  await env.DB.prepare(
-    "INSERT OR IGNORE INTO ai_usage_reservations (reservation_key, usage_date, neurons, audio_seconds, created_at) VALUES (?, ?, ?, 0, ?)"
-  ).bind(reservationKey, usageDate, neurons, now).run();
-  const reservation = await env.DB.prepare(
-    "SELECT reservation_key FROM ai_usage_reservations WHERE reservation_key = ?"
-  ).bind(reservationKey).first();
-  return Boolean(reservation);
+  return reserveNeuronBudget(env, reservationKey, neurons, 0);
 }
 
 async function ensureTranscript(env, job, payload) {
@@ -730,6 +732,11 @@ async function generateAutopilotScript(env,job,bucket) {
     .bind(job.workspace_id,job.day_key,finalTitle,job.id).first();
   if(duplicateTitle)throw new Error("Editorial QA skipped a repeated title already used today: "+finalTitle);
   const translatedScenes=await translateAutopilotSubtitles(env,job,scenes);
+  // Deepgram Aura-2 English is billed by input characters (2,727.27 neurons / 1k characters).
+  const voiceNeuronReserve=Math.ceil(narration.length*2727.27/1000*1.2);
+  if(!await reserveNeuronBudget(env,"autopilot-voice:"+job.id,voiceNeuronReserve,0)) {
+    throw new Error("ShortsFlow daily AI safety budget reached before voice generation; the video slot was paused to protect the free allocation.");
+  }
   const voiceResult=await env.AI.run("@cf/deepgram/aura-2-en",{text:narration,speaker:"luna",encoding:"mp3"});
   let audioBytes;
   if(voiceResult instanceof ReadableStream)audioBytes=await new Response(voiceResult).arrayBuffer();
@@ -776,9 +783,11 @@ async function processAutopilot(env) {
   const settings=await env.DB.prepare("SELECT s.* FROM autopilot_settings s JOIN youtube_connections y ON y.workspace_id=s.workspace_id WHERE s.enabled=1 ORDER BY s.updated_at ASC LIMIT 1").first();
   if(!settings)return;
   const workspaceId=settings.workspace_id,dayKey=localDayKey(settings.timezone);
-  const utcDate=new Date().toISOString().slice(0,10);
   const quotaPause=await env.DB.prepare("SELECT updated_at FROM autopilot_jobs WHERE workspace_id=? AND status='failed' AND last_error LIKE '%daily free allocation of 10,000 neurons%' ORDER BY updated_at DESC LIMIT 1").bind(workspaceId).first();
-  if(quotaPause&&String(quotaPause.updated_at||"").slice(0,10)===utcDate)return;
+  const lastQuotaFailure=Date.parse(String(quotaPause?.updated_at||""));
+  // Cloudflare documents a 00:00 UTC reset, but some Free accounts have reported delayed recovery.
+  // Wait 24 hours from the last 4006 response to avoid burning repeated failed requests.
+  if(Number.isFinite(lastQuotaFailure)&&Date.now()-lastQuotaFailure<24*60*60*1000)return;
   await makeAutopilotReport(env,workspaceId,dayKey);
   let job=await env.DB.prepare("SELECT * FROM autopilot_jobs WHERE workspace_id=? AND status IN ('queued','generating','generating_scenes') ORDER BY created_at LIMIT 1").bind(workspaceId).first();
   if(!job) {
@@ -809,6 +818,10 @@ async function processAutopilot(env) {
         await env.DB.prepare("UPDATE autopilot_jobs SET status='render_queued',updated_at=? WHERE id=? AND status='generating_scenes'").bind(new Date().toISOString(),job.id).run();
         return;
       }
+      // Reserve a conservative per-image allowance for four-step Flux Schnell output.
+      if(!await reserveNeuronBudget(env,"autopilot-flux:"+job.id+":scene:"+next.scene,120,0)) {
+        throw new Error("ShortsFlow daily AI safety budget reached before scene "+next.scene+" image generation; the video slot was paused.");
+      }
       const flux=await env.AI.run("@cf/black-forest-labs/flux-1-schnell",{
         prompt:textSafe(next.visual_prompt,1800)+" — vertical 9:16 original documentary illustration, cinematic natural lighting, no text, no logos, no watermark.",
         steps:4
@@ -830,7 +843,7 @@ async function processAutopilot(env) {
       .bind(message,new Date().toISOString(),job.id).run();
     if(/4006|daily free allocation of 10,000 neurons/i.test(message)){
       try{await makeAutopilotReport(env,workspaceId,dayKey);}catch(reportError){}
-      console.warn("autopilot_paused_workers_ai_daily_quota",workspaceId,utcDate);
+      console.warn("autopilot_paused_workers_ai_daily_quota",workspaceId);
     }
     console.error("autopilot_generation_failed",job.id,message);
   }
