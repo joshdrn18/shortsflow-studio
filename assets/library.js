@@ -31,10 +31,12 @@
       const kind=button.dataset.copyKind;
       const refs=(item.sourceReferences||[]).map(source=>(source.publisher?source.publisher+": ":"")+(source.url||"")).filter(Boolean);
       const value=kind==="title"?item.title:
+        kind==="hook"?item.hook:
+        kind==="script"?item.spokenScript:
         kind==="description"?item.platformDescription:
         kind==="tags"?(item.platformTags||[]).join(", "):
         kind==="hashtags"?item.hashtags:
-        ["TITLE",item.title,"","DESCRIPTION",item.platformDescription,"","TAGS",(item.platformTags||[]).join(", "),"","HASHTAGS",item.hashtags||"","", "SOURCES",refs.join("\n")].join("\n");
+        ["HOOK",item.hook||"","", "VOICE SCRIPT",item.spokenScript||"","", "TITLE",item.title,"","DESCRIPTION",item.platformDescription,"","TAGS",(item.platformTags||[]).join(", "),"","HASHTAGS",item.hashtags||"","", "SOURCES",refs.join("\n")].join("\n");
       if(!value){button.textContent="Nothing to copy";return;}
       try{
         if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(value);
@@ -63,7 +65,9 @@
       const tags=Array.isArray(a.platformTags)?a.platformTags:[];
       const packageHtml=a.isPublishReady?`
         <section class="library-package">
-          <div class="library-package-head"><div><span class="library-kicker">POST PACKAGE</span><b>Ready to publish</b></div><button class="secondary-button" data-copy-kind="all" data-asset="${esc(a.id)}">Copy all metadata</button></div>
+          <div class="library-package-head"><div><span class="library-kicker">POST PACKAGE</span><b>Ready to publish</b><small>Voice: ${esc(String(a.voiceLanguage||"en").toUpperCase())} · Subtitles: ${esc(String(a.subtitleConfig?.subtitleLanguage||"id").toUpperCase())}</small></div><button class="secondary-button" data-copy-kind="all" data-asset="${esc(a.id)}">Copy all content & metadata</button></div>
+          ${a.hook?`<div class="library-package-field"><div><b>Opening hook</b><button class="library-copy-button" data-copy-kind="hook" data-asset="${esc(a.id)}">Copy</button></div><p>${esc(a.hook)}</p></div>`:""}
+          ${a.spokenScript?`<div class="library-package-field"><div><b>Voice script</b><button class="library-copy-button" data-copy-kind="script" data-asset="${esc(a.id)}">Copy</button></div><p class="library-package-prewrap">${esc(a.spokenScript)}</p></div>`:""}
           <div class="library-package-field"><div><b>YouTube title</b><button class="library-copy-button" data-copy-kind="title" data-asset="${esc(a.id)}">Copy</button></div><p>${esc(a.title)}</p></div>
           <div class="library-package-field"><div><b>Description</b><button class="library-copy-button" data-copy-kind="description" data-asset="${esc(a.id)}">Copy</button></div><p class="library-package-prewrap">${esc(a.platformDescription)}</p></div>
           <div class="library-package-field"><div><b>Tags</b><button class="library-copy-button" data-copy-kind="tags" data-asset="${esc(a.id)}">Copy</button></div><p>${esc(tags.join(", ")||"No tags generated")}</p></div>
