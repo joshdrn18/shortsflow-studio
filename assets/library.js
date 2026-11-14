@@ -75,7 +75,7 @@
         <div class="library-video-wrap">
           <video class="library-video" controls preload="none" playsinline src="${esc(a.previewUrl)}"></video>
           <span class="library-format">${String(a.mimeType||"").includes("mp4")?"MP4":"WEBM"} · 9:16</span>
-          <span class="library-state ${a.isCurrent?"is-current":"is-old"}">${a.isPublishReady?"READY TO PUBLISH":a.isCurrent?"CURRENT":"PREVIOUS VERSION"}</span>
+          <span class="library-state ${a.isPublishReady?"is-ready":a.isCurrent?"is-current":"is-old"}">${a.isPublishReady?"READY TO PUBLISH":a.isCurrent?"CURRENT":"PREVIOUS VERSION"}</span>
         </div>
         <div class="library-card-body">
           <div class="library-card-top"><span class="library-version">RENDER V${a.version}</span><span class="library-size">${fmtBytes(a.sizeBytes)}</span></div>
