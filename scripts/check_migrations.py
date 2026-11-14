@@ -99,20 +99,6 @@ autopilot_job_columns = {row[1] for row in connection.execute("PRAGMA table_info
 for required_column in ("workspace_id", "day_key", "status", "script_json", "scenes_json", "audio_key", "output_key", "publishing_job_id", "platform_url"):
     if required_column not in autopilot_job_columns:
         raise SystemExit(f"autopilot_jobs.{required_column} is missing")
-connection.execute(
-    "INSERT INTO autopilot_settings (workspace_id, enabled, daily_target, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-    ("workspace-test", 1, 1, "2026-11-14T00:00:00Z", "2026-11-14T00:00:00Z"),
-)
-connection.execute(
-    "INSERT INTO autopilot_jobs (id, workspace_id, day_key, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-    ("autopilot-ready-test", "workspace-test", "2026-11-14", "ready_to_publish", "2026-11-14T00:00:00Z", "2026-11-14T00:00:00Z"),
-)
-ready_job = connection.execute(
-    "SELECT status FROM autopilot_jobs WHERE id=?",
-    ("autopilot-ready-test",),
-).fetchone()
-if ready_job != ("ready_to_publish",):
-    raise SystemExit("Autopilot ready_to_publish status is not accepted")
 
 autopilot_indexes = {row[1] for row in connection.execute("PRAGMA index_list(autopilot_jobs)")}
 if "idx_autopilot_queue" not in autopilot_indexes or "idx_autopilot_workspace_day" not in autopilot_indexes:
@@ -130,6 +116,21 @@ connection.execute(
     "INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES (?, ?, ?, ?)",
     ("membership-test", "workspace-test", "user-test", "owner"),
 )
+
+connection.execute(
+    "INSERT INTO autopilot_settings (workspace_id, enabled, daily_target, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    ("workspace-test", 1, 1, "2026-11-14T00:00:00Z", "2026-11-14T00:00:00Z"),
+)
+connection.execute(
+    "INSERT INTO autopilot_jobs (id, workspace_id, day_key, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ("autopilot-ready-test", "workspace-test", "2026-11-14", "ready_to_publish", "2026-11-14T00:00:00Z", "2026-11-14T00:00:00Z"),
+)
+ready_job = connection.execute(
+    "SELECT status FROM autopilot_jobs WHERE id=?",
+    ("autopilot-ready-test",),
+).fetchone()
+if ready_job != ("ready_to_publish",):
+    raise SystemExit("Autopilot ready_to_publish status is not accepted")
 
 try:
     connection.execute(
