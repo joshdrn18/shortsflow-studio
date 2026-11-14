@@ -4,7 +4,7 @@ import sqlite3
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
 
-expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql", "0016_workspace_brand_profiles.sql", "0017_brand_profile_metadata.sql", "0018_youtube_metric_snapshots.sql", "0019_youtube_retention_metrics.sql", "0020_background_render_jobs.sql", "0021_clip_score_breakdown.sql", "0022_autopilot.sql"]
+expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql", "0016_workspace_brand_profiles.sql", "0017_brand_profile_metadata.sql", "0018_youtube_metric_snapshots.sql", "0019_youtube_retention_metrics.sql", "0020_background_render_jobs.sql", "0021_clip_score_breakdown.sql", "0022_autopilot.sql", "0023_content_factory_only.sql"]
 actual = [path.name for path in MIGRATIONS]
 if actual != expected:
     raise SystemExit(f"Unexpected migration sequence: {actual}")
@@ -77,8 +77,9 @@ if "idx_clip_metadata_latest" not in metadata_indexes:
     raise SystemExit("Latest clip metadata index is missing")
 
 metadata_columns = {row[1] for row in connection.execute("PRAGMA table_info(clip_metadata)")}
-if "subtitle_config_json" not in metadata_columns:
-    raise SystemExit("clip_metadata.subtitle_config_json is missing")
+for required_column in ("subtitle_config_json", "platform_description", "platform_tags_json", "source_references_json"):
+    if required_column not in metadata_columns:
+        raise SystemExit(f"clip_metadata.{required_column} is missing")
 
 asset_columns = {row[1] for row in connection.execute("PRAGMA table_info(clip_assets)")}
 if "metadata_version" not in asset_columns:
@@ -98,6 +99,20 @@ autopilot_job_columns = {row[1] for row in connection.execute("PRAGMA table_info
 for required_column in ("workspace_id", "day_key", "status", "script_json", "scenes_json", "audio_key", "output_key", "publishing_job_id", "platform_url"):
     if required_column not in autopilot_job_columns:
         raise SystemExit(f"autopilot_jobs.{required_column} is missing")
+connection.execute(
+    "INSERT INTO autopilot_settings (workspace_id, enabled, daily_target, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    ("workspace-test", 1, 1, "2026-11-14T00:00:00Z", "2026-11-14T00:00:00Z"),
+)
+connection.execute(
+    "INSERT INTO autopilot_jobs (id, workspace_id, day_key, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ("autopilot-ready-test", "workspace-test", "2026-11-14", "ready_to_publish", "2026-11-14T00:00:00Z", "2026-11-14T00:00:00Z"),
+)
+ready_job = connection.execute(
+    "SELECT status FROM autopilot_jobs WHERE id=?",
+    ("autopilot-ready-test",),
+).fetchone()
+if ready_job != ("ready_to_publish",):
+    raise SystemExit("Autopilot ready_to_publish status is not accepted")
 
 autopilot_indexes = {row[1] for row in connection.execute("PRAGMA index_list(autopilot_jobs)")}
 if "idx_autopilot_queue" not in autopilot_indexes or "idx_autopilot_workspace_day" not in autopilot_indexes:
