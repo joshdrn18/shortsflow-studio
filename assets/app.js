@@ -15,6 +15,7 @@ const activityLabels = {
   "clip_review_approved": "Clip approved",
   "clip_review_rejected": "Clip rejected",
   "clip_review_changes_requested": "Changes requested",
+  "content_package_ready": "Publish-ready content package created",
   "youtube_publish_queued": "YouTube upload queued",
   "youtube.published": "Short published to YouTube"
 };
