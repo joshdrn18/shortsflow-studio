@@ -10,6 +10,7 @@ export async function onRequestGet({ request, env }) {
              a.metadata_version, a.size_bytes, a.mime_type, a.created_at,
              c.start_seconds, c.end_seconds, c.status AS clip_status,
              COALESCE(m.title, c.title) AS title, m.caption, m.hashtags,
+             m.platform_description, m.platform_tags_json, m.source_references_json,
              s.title AS source_title,
              (SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=c.id) AS current_metadata_version
       FROM clip_assets a
@@ -29,7 +30,12 @@ export async function onRequestGet({ request, env }) {
       sourceTitle: row.source_title || "Source video",
       startSeconds: Number(row.start_seconds || 0), endSeconds: Number(row.end_seconds || 0),
       durationSeconds: Math.max(0, Number(row.end_seconds || 0) - Number(row.start_seconds || 0)),
-      caption: row.caption || "", hashtags: row.hashtags || "", clipStatus: row.clip_status || "draft",
+      caption: row.caption || "", hashtags: row.hashtags || "",
+      platformDescription: row.platform_description || "",
+      platformTags: (() => { try { const v=JSON.parse(row.platform_tags_json || "[]"); return Array.isArray(v)?v:[]; } catch { return []; } })(),
+      sourceReferences: (() => { try { const v=JSON.parse(row.source_references_json || "[]"); return Array.isArray(v)?v:[]; } catch { return []; } })(),
+      isPublishReady: Boolean(row.platform_description),
+      clipStatus: row.clip_status || "draft",
       previewUrl: `/api/clips/${row.clip_id}/render?assetId=${encodeURIComponent(row.asset_id)}`,
       downloadUrl: `/api/clips/${row.clip_id}/render?assetId=${encodeURIComponent(row.asset_id)}&download=1`
     }));
