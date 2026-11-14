@@ -594,11 +594,23 @@ async function translateAutopilotSubtitles(env,job,scenes) {
 }
 
 async function generateAutopilotScript(env,job,bucket) {
-  const sources=await discoverAutopilotSources();
-  if(sources.length<1)throw new Error("No recent publisher RSS article with a substantive excerpt could be verified. This slot was skipped.");
-  const previous=await env.DB.prepare("SELECT title,topic FROM autopilot_jobs WHERE workspace_id=? AND created_at>? ORDER BY created_at DESC LIMIT 20")
+  const discovered=await discoverAutopilotSources();
+  const previous=await env.DB.prepare("SELECT title,topic,sources_json FROM autopilot_jobs WHERE workspace_id=? AND created_at>? ORDER BY created_at DESC LIMIT 30")
     .bind(job.workspace_id,new Date(Date.now()-30*86400000).toISOString()).all();
-  const avoid=(previous.results||[]).map(item=>item.title+" — "+item.topic).join("\n");
+  const priorRows=previous.results||[];
+  const usedArticleUrls=new Set();
+  for(const row of priorRows) {
+    try {
+      const list=JSON.parse(row.sources_json||"[]");
+      for(const item of (Array.isArray(list)?list:[])) {
+        const url=String(item.article_url||item.link||"").trim();
+        if(url)usedArticleUrls.add(url);
+      }
+    } catch {}
+  }
+  const sources=discovered.filter(source=>!usedArticleUrls.has(String(source.article_url||source.link||"").trim()));
+  if(sources.length<1)throw new Error("No unused recent full-text publisher article was available. This slot was skipped rather than repeating a previously used story.");
+  const avoid=priorRows.map(item=>item.title+" — "+item.topic).filter(value=>value.trim()!=="—").join("\n");
   const selectedResearch=sources.slice(0,3);
   await env.DB.prepare("UPDATE autopilot_jobs SET sources_json=?,updated_at=? WHERE id=? AND status='generating'").bind(JSON.stringify(selectedResearch),new Date().toISOString(),job.id).run();
   const sourceBrief=selectedResearch.map((item,index)=>
@@ -714,6 +726,10 @@ async function generateAutopilotScript(env,job,bucket) {
       throw new Error("Research QA rejected an unsupported number in the narration: "+claim);
     }
   }
+  const finalTitle=textSafe(script.title,100);
+  const duplicateTitle=await env.DB.prepare("SELECT id FROM autopilot_jobs WHERE workspace_id=? AND day_key=? AND title=? AND id<>? LIMIT 1")
+    .bind(job.workspace_id,job.day_key,finalTitle,job.id).first();
+  if(duplicateTitle)throw new Error("Editorial QA skipped a repeated title already used today: "+finalTitle);
   const translatedScenes=await translateAutopilotSubtitles(env,job,scenes);
   const voiceResult=await env.AI.run("@cf/deepgram/aura-2-en",{text:narration,speaker:"luna",encoding:"mp3"});
   let audioBytes;
@@ -726,7 +742,7 @@ async function generateAutopilotScript(env,job,bucket) {
   const audioKey="workspaces/"+job.workspace_id+"/autopilot/"+job.id+"/voice.mp3";
   await bucket.put(audioKey,audioBytes,{httpMetadata:{contentType:"audio/mpeg"},customMetadata:{workspaceId:job.workspace_id,autopilotJobId:job.id}});
   const output={
-    title:textSafe(script.title,100),niche:textSafe(script.niche,80)||"Trending stories",
+    title:finalTitle,niche:textSafe(script.niche,80)||"Trending stories",
     topic:textSafe(script.topic,180),hook:textSafe(script.hook,260),narration,
     caption:textSafe(script.caption,1200),
     hashtags:Array.isArray(script.hashtags)?script.hashtags.slice(0,8).map(x=>textSafe(x,50)):[],
