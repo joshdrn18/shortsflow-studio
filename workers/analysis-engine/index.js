@@ -732,12 +732,12 @@ async function generateAutopilotScript(env,job,bucket) {
     .bind(job.workspace_id,job.day_key,finalTitle,job.id).first();
   if(duplicateTitle)throw new Error("Editorial QA skipped a repeated title already used today: "+finalTitle);
   const translatedScenes=await translateAutopilotSubtitles(env,job,scenes);
-  // Deepgram Aura-2 English is billed by input characters (2,727.27 neurons / 1k characters).
-  const voiceNeuronReserve=Math.ceil(narration.length*2727.27/1000*1.2);
+  // Deepgram Aura-1 English is billed by input characters (1,363.64 neurons / 1k characters); reserve a 30% safety margin.
+  const voiceNeuronReserve=Math.ceil(narration.length*1363.64/1000*1.3);
   if(!await reserveNeuronBudget(env,"autopilot-voice:"+job.id,voiceNeuronReserve,0)) {
     throw new Error("ShortsFlow daily AI safety budget reached before voice generation; the video slot was paused to protect the free allocation.");
   }
-  const voiceResult=await env.AI.run("@cf/deepgram/aura-2-en",{text:narration,speaker:"luna",encoding:"mp3"});
+  const voiceResult=await env.AI.run("@cf/deepgram/aura-1",{text:narration,speaker:"luna",encoding:"mp3"});
   let audioBytes;
   if(voiceResult instanceof ReadableStream)audioBytes=await new Response(voiceResult).arrayBuffer();
   else if(voiceResult?.audio instanceof ReadableStream)audioBytes=await new Response(voiceResult.audio).arrayBuffer();
