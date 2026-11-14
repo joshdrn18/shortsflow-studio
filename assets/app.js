@@ -25,9 +25,8 @@ const views = {
   sources: ["Sources", "Manage the long-form videos you want to turn into Shorts."],
   clips: ["Clip discovery", "Review AI-detected moments and potential short-form cuts."],
   review: ["Review center", "Your approval is required before any clip can be published."],
-  library: ["Content library", "Browse rendered videos, drafts and published content."],
+  library: ["Content & drafts", "Preview finished Shorts and copy the complete publish-ready metadata package."],
   rendering: ["Rendering", "Track active renders, queue positions and estimated wait times."],
-  publisher: ["Publisher", "Connect YouTube and manage approved publishing jobs."],
   settings: ["Settings", "Configure your workspace and production preferences."]
 };
 let activeView = "overview";
