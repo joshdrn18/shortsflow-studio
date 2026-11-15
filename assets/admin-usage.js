@@ -46,6 +46,10 @@
     const incidents = data.quotaIncidents || {};
     const history = Array.isArray(data.history) ? data.history : [];
     const events = Array.isArray(incidents.events) ? incidents.events : [];
+    const providerHistory = Array.isArray(cloudflare.history) ? cloudflare.history : [];
+    const providerConnected = cloudflare.actualUsageStatus === "connected";
+    const providerUsage = cloudflare.actualUsage === null || cloudflare.actualUsage === undefined ? null : Number(cloudflare.actualUsage);
+    const providerPercent = Math.max(0, Number(cloudflare.usagePercentOfReference || 0));
     const reserved = Number(budget.reservedNeurons || 0);
     const limit = Number(budget.dailyLimit || 3500);
     const percent = Math.max(0, Math.min(100, Number(budget.percent || 0)));
@@ -76,9 +80,9 @@
           <p>ShortsFlow's own admission-control cap</p>
         </article>
         <article class="admin-usage-card">
-          <span>Cloudflare Free allocation</span>
-          <strong>${number(cloudflare.dailyFreeAllocationReference)} <small>neurons/day</small></strong>
-          <p>Published reference, not a live balance</p>
+          <span>Cloudflare AI usage today</span>
+          <strong>${providerUsage === null ? "—" : number(providerUsage, 2)} <small>neurons</small></strong>
+          <p>${providerConnected ? "Account-wide provider analytics · UTC" : "Provider analytics unavailable"}</p>
         </article>
         <article class="admin-usage-card">
           <span>Quota incidents logged</span>
@@ -98,18 +102,35 @@
           <div class="admin-usage-note"><b>Important:</b> This meter shows estimated neuron reservations made by ShortsFlow before AI calls. It is not the actual Cloudflare account-wide usage.</div>
         </section>
         <section class="admin-usage-panel">
-          <div class="admin-usage-panel-head"><div><h3>Cloudflare account usage</h3><p>Provider-reported quota balance.</p></div><span class="admin-usage-unavailable">NOT CONNECTED</span></div>
-          <div class="admin-usage-unavailable-body"><strong>Live usage unavailable</strong><p>${escapeHTML(cloudflare.note || "The current Cloudflare connection does not expose account-wide AI usage.")}</p><a href="https://developers.cloudflare.com/workers-ai/platform/pricing/" target="_blank" rel="noopener noreferrer">Workers AI allocation & pricing ↗</a></div>
+          <div class="admin-usage-panel-head"><div><h3>Cloudflare account usage</h3><p>Account-wide Workers AI inference telemetry.</p></div><span class="admin-usage-connection ${providerConnected ? "connected" : "disconnected"}">${providerConnected ? "ANALYTICS CONNECTED" : cloudflare.actualUsageStatus === "error" ? "CHECK PERMISSIONS" : "NOT CONNECTED"}</span></div>
+          ${providerConnected ? `
+            <div class="admin-usage-provider-value"><strong>${number(providerUsage, 2)} <small>neurons</small></strong><span>${escapeHTML(data.usageDateUTC || "—")} UTC</span></div>
+            <div class="admin-usage-progress"><span style="width:${Math.min(100, providerPercent)}%"></span></div>
+            <div class="admin-usage-progress-labels"><span>${number(providerPercent, 1)}% of published Free reference</span><span>${number(cloudflare.dailyFreeAllocationReference)} neurons/day</span></div>
+            <div class="admin-usage-details">
+              <div><span>Estimated headroom</span><b>${cloudflare.estimatedHeadroom == null ? "—" : number(cloudflare.estimatedHeadroom, 2) + " neurons"}</b></div>
+              <div><span>Analytics data through</span><b>${escapeHTML(cloudflare.latestDataDate || data.usageDateUTC || "—")} UTC</b></div>
+            </div>
+            <div class="admin-usage-note"><b>Usage source:</b> Cloudflare GraphQL Analytics. Estimated headroom is calculated against the published Free allocation; this is not a live remaining-neuron balance. Analytics may be delayed.</div>
+          ` : `
+            <div class="admin-usage-unavailable-body"><strong>${cloudflare.actualUsageStatus === "error" ? "Analytics connection needs attention" : "Live usage unavailable"}</strong><p>${escapeHTML(cloudflare.note || "Add the CLOUDFLARE_ANALYTICS_TOKEN Pages secret to enable account-wide Workers AI analytics.")}</p><a href="https://developers.cloudflare.com/workers-ai/platform/pricing/" target="_blank" rel="noopener noreferrer">Workers AI allocation & pricing ↗</a></div>
+          `}
         </section>
       </div>
       <div class="admin-usage-grid lower">
         <section class="admin-usage-panel">
-          <div class="admin-usage-panel-head"><div><h3>Recent daily reservations</h3><p>Last 14 UTC days recorded in the internal ledger.</p></div></div>
+          <div class="admin-usage-panel-head"><div><h3>Cloudflare daily AI usage</h3><p>Provider-reported account-wide neurons from Analytics · UTC.</p></div></div>
+          ${providerConnected && providerHistory.length ? `<div class="admin-usage-history">${providerHistory.map((row) => {
+            const value = Number(row.neurons || 0);
+            const width = Math.min(100, (value / Number(cloudflare.dailyFreeAllocationReference || 10000)) * 100);
+            return `<div class="admin-usage-history-row"><div><b>${escapeHTML(row.date)}</b><strong>${number(value, 2)} neurons</strong></div><div class="admin-usage-mini-track"><span style="width:${width}%"></span></div><small>${number(Number(row.audioSeconds || 0) / 60, 1)} min audio · ${number(row.requests)} inference records</small></div>`;
+          }).join("")}</div>` : '<div class="admin-usage-empty">Cloudflare Analytics history is not available.</div>'}
+          <div class="admin-usage-subsection"><div class="admin-usage-panel-head"><div><h3>ShortsFlow daily reservations</h3><p>Estimated reservations recorded in this workspace · UTC.</p></div></div>
           ${history.length ? `<div class="admin-usage-history">${history.map((row) => {
             const value = Number(row.neuronsReserved || 0);
             const width = Math.min(100, (value / limit) * 100);
-            return `<div class="admin-usage-history-row"><div><b>${escapeHTML(row.date)}</b><strong>${number(value, 2)}</strong></div><div class="admin-usage-mini-track"><span style="width:${width}%"></span></div><small>${number(Number(row.audioSecondsReserved || 0) / 60, 1)} min audio reserved</small></div>`;
-          }).join("")}</div>` : '<div class="admin-usage-empty">No reservation history has been recorded yet.</div>'}
+            return `<div class="admin-usage-history-row"><div><b>${escapeHTML(row.date)}</b><strong>${number(value, 2)} neurons</strong></div><div class="admin-usage-mini-track"><span style="width:${width}%"></span></div><small>${number(Number(row.audioSecondsReserved || 0) / 60, 1)} min audio reserved</small></div>`;
+          }).join("")}</div>` : '<div class="admin-usage-empty">No reservation history has been recorded yet.</div>'}</div>
         </section>
         <section class="admin-usage-panel">
           <div class="admin-usage-panel-head"><div><h3>Quota incident monitor</h3><p>Failed calls and internal budget blocks saved by the pipeline.</p></div><b>${number(incidents.total || 0)} total</b></div>
