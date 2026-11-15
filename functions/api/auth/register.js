@@ -48,6 +48,6 @@ export async function onRequestPost({ request, env }) {
   const session = await createSession(env.DB, userId);
   return json({
     ok: true,
-    user: { id: userId, email, displayName, workspace: { id: workspaceId, name: `${displayName}'s workspace`, role: "owner" } }
+    user: { id: userId, email, displayName, systemRole: "member", workspace: { id: workspaceId, name: `${displayName}'s workspace`, role: "owner" } }
   }, 201, { "Set-Cookie": session.cookie });
 }
