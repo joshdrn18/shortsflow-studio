@@ -28,7 +28,7 @@ const views = {
   library: ["Content & drafts", "Preview finished Shorts and copy the complete publish-ready metadata package."],
   rendering: ["Rendering", "Track active renders, queue positions and estimated wait times."],
   settings: ["Settings", "Configure your workspace and production preferences."],
-  admin: ["Admin panel", "Monitor AI usage, internal safety budgets and quota incidents."]
+  admin: ["Admin panel", "Manage members, monitor production queues and review platform health."]
 };
 let activeView = "overview";
 let isGlobalAdmin = false;
@@ -57,7 +57,7 @@ function ensurePlaceholder() {
 function hideAllPagePanels() {
   [
     ".welcome-panel", ".section-head", ".stats-grid", ".lower-grid",
-    "#sources-workspace", "#clips-workspace", "#review-workspace", "#library-workspace", "#publisher-workspace", "#rendering-workspace", "#watermark-settings", "#workspace-settings", "#admin-usage-workspace", "#feature-placeholder"
+    "#sources-workspace", "#clips-workspace", "#review-workspace", "#library-workspace", "#publisher-workspace", "#rendering-workspace", "#watermark-settings", "#workspace-settings", "#admin-usage-workspace", "#admin-control-workspace", "#feature-placeholder"
   ].forEach((selector) => $(selector)?.classList.add("hidden"));
 }
 
