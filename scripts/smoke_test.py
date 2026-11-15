@@ -7,7 +7,7 @@ import os
 import time
 
 BASE_URL = os.environ.get("SHORTSFLOW_BASE_URL", "https://shortsflow-studio.pages.dev").rstrip("/")
-BUILD = "20261115-admin1"
+BUILD = "20261115-admin2"
 TIMEOUT_SECONDS = 240
 RETRY_SECONDS = 5
 
@@ -95,6 +95,12 @@ except HTTPError as error:
     overview_status = error.code
 if overview_status not in (401, 403):
     raise SystemExit(f"Admin overview endpoint must reject unauthenticated requests (HTTP {overview_status}).")
+try:
+    actions_status, _, _ = get("/api/admin/actions")
+except HTTPError as error:
+    actions_status = error.code
+if actions_status not in (401, 403, 405):
+    raise SystemExit(f"Admin actions endpoint must reject unauthenticated requests (HTTP {actions_status}).")
 
 worker_url = "https://shortsflow-analysis-engine.inipastiuy-41f.workers.dev/health"
 worker_status, _, worker_body = get(worker_url)
