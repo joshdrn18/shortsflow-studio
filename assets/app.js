@@ -88,6 +88,12 @@ function navigate(view) {
   if (window.innerWidth <= 720) $("#sidebar")?.classList.remove("open");
 }
 navItems.forEach((button) => button.addEventListener("click", () => navigate(button.dataset.view)));
+document.querySelectorAll("[data-shortcut-view]").forEach((button) => {
+  button.addEventListener("click", () => {
+    navigate(button.dataset.shortcutView);
+    if (button.dataset.shortcutAction === "add-source") $("#source-file")?.click();
+  });
+});
 
 const workspaceMenuTrigger = $("#workspace-menu-trigger");
 const workspaceMenu = $("#workspace-menu");
