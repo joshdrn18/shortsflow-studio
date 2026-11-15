@@ -4,7 +4,7 @@ import json
 import shlex
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = "20261115-publisher-suite1"
+BUILD = "20261115-publisher-suite2"
 
 class Assets(HTMLParser):
     def __init__(self):
@@ -45,6 +45,10 @@ actual |= {str(path.relative_to(ROOT)) for path in (ROOT / "workers").rglob("*.j
 omitted = sorted(actual - checked)
 if omitted:
     raise SystemExit(f"JavaScript files not covered by syntax checks: {omitted}")
+addon_js = (ROOT / "assets/publisher-addons.js").read_text(encoding="utf-8")
+for marker in ("publisher-draft-bar", "publisher-queue-controls", "publisher-failure-diagnosis", "publisher-history-export", "publisher-system-health"):
+    if marker not in addon_js:
+        raise SystemExit(f"Publisher add-on feature missing: {marker}")
 if f"UI build {BUILD}" not in html:
     raise SystemExit("Visible UI build marker is missing.")
 compile((ROOT / "scripts/background_render.py").read_text(encoding="utf-8"), "scripts/background_render.py", "exec")
@@ -62,7 +66,7 @@ if "u.system_role" not in auth_lib:
     raise SystemExit("Session lookup must load the global administrator role.")
 if 'user.systemRole !== "admin"' not in admin_overview_api:
     raise SystemExit("Admin overview API must require the global administrator role.")
-if "publisher.js" not in html or 'publisher: ["Publisher"' not in app_js:
+if "publisher.js" not in html or "publisher-addons.js" not in html or 'publisher: ["Publisher"' not in app_js:
     raise SystemExit("Publisher navigation or script is not wired into the application.")
 smoke_test = (ROOT / "scripts/smoke_test.py").read_text(encoding="utf-8")
 if f'BUILD = "{BUILD}"' not in smoke_test:

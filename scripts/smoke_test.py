@@ -7,7 +7,7 @@ import os
 import time
 
 BASE_URL = os.environ.get("SHORTSFLOW_BASE_URL", "https://shortsflow-studio.pages.dev").rstrip("/")
-BUILD = "20261115-publisher-suite1"
+BUILD = "20261115-publisher-suite2"
 TIMEOUT_SECONDS = 240
 RETRY_SECONDS = 5
 
@@ -79,6 +79,9 @@ if not asset_paths:
 if "/assets/publisher.js" not in [urlsplit(value).path for value in parser.urls]:
     raise SystemExit("Publisher workspace script is missing from production HTML.")
 
+if "/assets/publisher-addons.js" not in [urlsplit(value).path for value in parser.urls]:
+    raise SystemExit("Publisher add-on script is missing from production HTML.")
+
 for path in asset_paths:
     status, asset_headers, _ = get(path)
     if status != 200:
@@ -95,6 +98,13 @@ if not health.get("ok") or not health.get("databaseConfigured") or not health.ge
     raise SystemExit("Production API health check failed: database or media binding is unavailable.")
 if "no-store" not in health_headers.get("Cache-Control", "").lower():
     raise SystemExit("API health response is missing no-store cache policy.")
+
+try:
+    publisher_health_status, _, _ = get("/api/system/health")
+except HTTPError as error:
+    publisher_health_status = error.code
+if publisher_health_status not in (401, 403):
+    raise SystemExit(f"Publisher system health endpoint must reject unauthenticated requests (HTTP {publisher_health_status}).")
 
 try:
     admin_status, _, _ = get("/api/admin/ai-usage")
