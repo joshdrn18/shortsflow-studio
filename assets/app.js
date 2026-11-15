@@ -27,7 +27,8 @@ const views = {
   review: ["Review center", "Your approval is required before any clip can be published."],
   library: ["Content & drafts", "Preview finished Shorts and copy the complete publish-ready metadata package."],
   rendering: ["Rendering", "Track active renders, queue positions and estimated wait times."],
-  settings: ["Settings", "Configure your workspace and production preferences."]
+  settings: ["Settings", "Configure your workspace and production preferences."],
+  admin: ["Admin panel", "Monitor AI usage, internal safety budgets and quota incidents."]
 };
 let activeView = "overview";
 
@@ -55,7 +56,7 @@ function ensurePlaceholder() {
 function hideAllPagePanels() {
   [
     ".welcome-panel", ".section-head", ".stats-grid", ".lower-grid",
-    "#sources-workspace", "#clips-workspace", "#review-workspace", "#library-workspace", "#publisher-workspace", "#rendering-workspace", "#watermark-settings", "#workspace-settings", "#feature-placeholder"
+    "#sources-workspace", "#clips-workspace", "#review-workspace", "#library-workspace", "#publisher-workspace", "#rendering-workspace", "#watermark-settings", "#workspace-settings", "#admin-usage-workspace", "#feature-placeholder"
   ].forEach((selector) => $(selector)?.classList.add("hidden"));
 }
 
@@ -74,7 +75,7 @@ function navigate(view) {
 
   if (next === "overview") {
     [".welcome-panel", ".section-head", ".stats-grid", ".lower-grid"].forEach((selector) => $(selector)?.classList.remove("hidden"));
-  } else if (next === "sources" || next === "clips" || next === "review" || next === "library" || next === "publisher" || next === "rendering" || next === "settings") {
+  } else if (next === "sources" || next === "clips" || next === "review" || next === "library" || next === "publisher" || next === "rendering" || next === "settings" || next === "admin") {
     document.dispatchEvent(new CustomEvent("shortsflow:view", { detail: { view: next } }));
   } else {
     const panel = ensurePlaceholder();
@@ -190,6 +191,7 @@ $("#auth-form")?.addEventListener("submit", async (event) => {
     $("#auth-overlay").classList.add("hidden");
     $("#auth-password").value = "";
     toast(authMode === "register" ? "Your workspace is ready." : "Welcome back.");
+    await refreshAdminAccess();
     await loadWorkspaceSummary();
   } catch (error) {
     message.textContent = error.message || "Something went wrong. Please try again.";
@@ -199,6 +201,22 @@ $("#auth-form")?.addEventListener("submit", async (event) => {
     button.innerHTML = authMode === "register" ? "Create account <span>→</span>" : "Sign in <span>→</span>";
   }
 });
+
+function applyAdminAccess(user) {
+  const role = String(user?.workspace?.role || "").toLowerCase();
+  const allowed = ["owner", "admin"].includes(role);
+  $("#admin-nav-item")?.classList.toggle("hidden", !allowed);
+  if (!allowed && activeView === "admin") navigate("overview");
+}
+async function refreshAdminAccess() {
+  try {
+    const response = await fetch("/api/auth/me", { headers: { accept: "application/json" } });
+    const data = await response.json();
+    applyAdminAccess(data.authenticated ? data.user : null);
+  } catch {
+    applyAdminAccess(null);
+  }
+}
 
 async function checkSession() {
   try {
@@ -213,9 +231,11 @@ async function checkSession() {
     }
     const data = await response.json();
     if (data.authenticated) {
+      applyAdminAccess(data.user);
       $("#auth-overlay").classList.add("hidden");
       await loadWorkspaceSummary();
     } else {
+      applyAdminAccess(null);
       showAuth();
     }
   } catch {

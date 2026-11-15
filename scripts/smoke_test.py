@@ -7,7 +7,7 @@ import os
 import time
 
 BASE_URL = os.environ.get("SHORTSFLOW_BASE_URL", "https://shortsflow-studio.pages.dev").rstrip("/")
-BUILD = "20261115-ui3"
+BUILD = "20261115-ui4"
 TIMEOUT_SECONDS = 240
 RETRY_SECONDS = 5
 
@@ -82,6 +82,13 @@ if not health.get("ok") or not health.get("databaseConfigured") or not health.ge
     raise SystemExit("Production API health check failed: database or media binding is unavailable.")
 if "no-store" not in health_headers.get("Cache-Control", "").lower():
     raise SystemExit("API health response is missing no-store cache policy.")
+
+try:
+    admin_status, _, _ = get("/api/admin/ai-usage")
+except HTTPError as error:
+    admin_status = error.code
+if admin_status not in (401, 403):
+    raise SystemExit(f"Admin AI usage endpoint must reject unauthenticated requests (HTTP {admin_status}).")
 
 worker_url = "https://shortsflow-analysis-engine.inipastiuy-41f.workers.dev/health"
 worker_status, _, worker_body = get(worker_url)
