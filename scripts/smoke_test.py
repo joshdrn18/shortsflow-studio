@@ -32,6 +32,17 @@ def get(path):
     with urlopen(request, timeout=20) as response:
         return response.status, response.headers, response.read()
 
+def post(path, payload):
+    target = path if urlsplit(path).scheme else BASE_URL + path
+    request = Request(target, data=json.dumps(payload).encode("utf-8"), method="POST", headers={
+        "User-Agent": "ShortsFlow-production-smoke-test",
+        "Cache-Control": "no-cache",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    })
+    with urlopen(request, timeout=20) as response:
+        return response.status, response.headers, response.read()
+
 deadline = time.monotonic() + TIMEOUT_SECONDS
 last_error = None
 while time.monotonic() < deadline:
@@ -96,10 +107,10 @@ except HTTPError as error:
 if overview_status not in (401, 403):
     raise SystemExit(f"Admin overview endpoint must reject unauthenticated requests (HTTP {overview_status}).")
 try:
-    actions_status, _, _ = get("/api/admin/actions")
+    actions_status, _, _ = post("/api/admin/actions", {})
 except HTTPError as error:
     actions_status = error.code
-if actions_status not in (401, 403, 405):
+if actions_status not in (400, 401, 403):
     raise SystemExit(f"Admin actions endpoint must reject unauthenticated requests (HTTP {actions_status}).")
 
 worker_url = "https://shortsflow-analysis-engine.inipastiuy-41f.workers.dev/health"
