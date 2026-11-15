@@ -4,7 +4,7 @@ import json
 import shlex
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = "20261115-ai-analytics1"
+BUILD = "20261115-publisher-ui1"
 
 class Assets(HTMLParser):
     def __init__(self):
@@ -62,6 +62,8 @@ if "u.system_role" not in auth_lib:
     raise SystemExit("Session lookup must load the global administrator role.")
 if 'user.systemRole !== "admin"' not in admin_overview_api:
     raise SystemExit("Admin overview API must require the global administrator role.")
+if "publisher.js" not in html or 'publisher: ["Publisher"' not in app_js:
+    raise SystemExit("Publisher navigation or script is not wired into the application.")
 if "admin-control.js" not in html or "admin-control.css" not in html or "admin-actions.js" not in html or "admin-actions.css" not in html:
     raise SystemExit("Admin control center assets are not linked.")
 print("OK: global admin access is separate from workspace owner permissions.")

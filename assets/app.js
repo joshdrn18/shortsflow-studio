@@ -26,6 +26,7 @@ const views = {
   clips: ["Clip discovery", "Review AI-detected moments and potential short-form cuts."],
   review: ["Review center", "Your approval is required before any clip can be published."],
   library: ["Content & drafts", "Preview finished Shorts and copy the complete publish-ready metadata package."],
+  publisher: ["Publisher", "Connect your YouTube channel, prepare approved uploads and track channel performance."],
   rendering: ["Rendering", "Track active renders, queue positions and estimated wait times."],
   settings: ["Settings", "Configure your workspace and production preferences."],
   admin: ["Admin panel", "Manage members, monitor production queues and review platform health."]
