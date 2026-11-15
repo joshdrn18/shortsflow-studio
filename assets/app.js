@@ -31,6 +31,7 @@ const views = {
   admin: ["Admin panel", "Monitor AI usage, internal safety budgets and quota incidents."]
 };
 let activeView = "overview";
+let isGlobalAdmin = false;
 
 function toast(message) {
   const region = $("#toast-region");
@@ -61,7 +62,7 @@ function hideAllPagePanels() {
 }
 
 function navigate(view) {
-  const next = views[view] ? view : "overview";
+  const next = view === "admin" && !isGlobalAdmin ? "overview" : (views[view] ? view : "overview");
   activeView = next;
   navItems.forEach((button) => {
     const selected = button.dataset.view === next;
@@ -203,10 +204,9 @@ $("#auth-form")?.addEventListener("submit", async (event) => {
 });
 
 function applyAdminAccess(user) {
-  const role = String(user?.workspace?.role || "").toLowerCase();
-  const allowed = ["owner", "admin"].includes(role);
-  $("#admin-nav-item")?.classList.toggle("hidden", !allowed);
-  if (!allowed && activeView === "admin") navigate("overview");
+  isGlobalAdmin = user?.systemRole === "admin";
+  $("#admin-nav-item")?.classList.toggle("hidden", !isGlobalAdmin);
+  if (!isGlobalAdmin && activeView === "admin") navigate("overview");
 }
 async function refreshAdminAccess() {
   try {
