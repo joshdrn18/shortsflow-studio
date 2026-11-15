@@ -78,7 +78,7 @@
  async function manageOldRenders(clipId,button){
   let panel=$("#clip-render-cleanup-panel");
   if(panel&&!panel.hidden){panel.hidden=true;return;}
-  if(!panel){panel=document.createElement("section");panel.id="clip-render-cleanup-panel";panel.className="panel";panel.style.marginTop="12px";button.insertAdjacentElement("afterend",panel);}
+  if(!panel){panel=document.createElement("section");panel.id="clip-render-cleanup-panel";panel.className="panel";panel.style.marginTop="12px";const tools=$("#clip-render-tools");if(tools)tools.insertAdjacentElement("afterend",panel);else button.insertAdjacentElement("afterend",panel);}
   panel.hidden=false;panel.replaceChildren();const loading=document.createElement("p");loading.textContent="Checking old render versions…";panel.append(loading);button.disabled=true;
   try{
    const response=await fetch("/api/clips/"+encodeURIComponent(clipId)+"/render-assets",{headers:{accept:"application/json"}});
@@ -101,7 +101,7 @@
  }
  async function showRenderHistory(clipId,button){
   let panel=$("#clip-render-history-panel");if(panel&&!panel.hidden){panel.hidden=true;return;}
-  if(!panel){panel=document.createElement("section");panel.id="clip-render-history-panel";panel.className="panel";panel.style.marginTop="12px";button.insertAdjacentElement("afterend",panel);}
+  if(!panel){panel=document.createElement("section");panel.id="clip-render-history-panel";panel.className="panel";panel.style.marginTop="12px";const tools=$("#clip-render-tools");if(tools)tools.insertAdjacentElement("afterend",panel);else button.insertAdjacentElement("afterend",panel);}
   panel.hidden=false;panel.replaceChildren();const loading=document.createElement("p");loading.textContent="Loading render history…";panel.append(loading);button.disabled=true;
   try{
    const response=await fetch("/api/clips/"+encodeURIComponent(clipId)+"/render-history",{headers:{accept:"application/json"}}),data=await response.json();
@@ -147,10 +147,29 @@
   finally{button.disabled=false;}
  }
  function ensureCleanupButton(msg,clipId){
-  let button=$("#clip-render-cleanup");if(!button){button=document.createElement("button");button.type="button";button.id="clip-render-cleanup";button.className="text-button";button.textContent="Manage old renders";button.style.marginTop="10px";msg.insertAdjacentElement("afterend",button);button.addEventListener("click",()=>manageOldRenders(button.dataset.clipId,button));}
-  button.dataset.clipId=clipId;
-  let history=$("#clip-render-history");if(!history){history=document.createElement("button");history.type="button";history.id="clip-render-history";history.className="text-button";history.textContent="Render history";history.style.marginTop="10px";button.insertAdjacentElement("afterend",history);history.addEventListener("click",()=>showRenderHistory(history.dataset.clipId,history));}
-  history.dataset.clipId=clipId;
+  let toolbar=$("#clip-render-tools");
+  if(!toolbar){
+   toolbar=document.createElement("div");toolbar.id="clip-render-tools";toolbar.className="render-tool-panel";
+   const copy=document.createElement("div");copy.className="render-tool-copy";
+   const title=document.createElement("strong");title.textContent="Render library";
+   const hint=document.createElement("small");hint.textContent="Review saved versions or manage older files.";
+   copy.append(title,hint);toolbar.append(copy);msg.insertAdjacentElement("afterend",toolbar);
+  }
+  let button=$("#clip-render-cleanup");
+  if(!button){
+   button=document.createElement("button");button.type="button";button.id="clip-render-cleanup";button.className="render-tool-button";
+   button.textContent="Manage old renders";button.title="View unused historical renders that can be safely removed.";
+   button.addEventListener("click",()=>manageOldRenders(button.dataset.clipId,button));
+  }
+  let history=$("#clip-render-history");
+  if(!history){
+   history=document.createElement("button");history.type="button";history.id="clip-render-history";history.className="render-tool-button";
+   history.textContent="Render history";history.title="View, preview and compare saved render versions.";
+   history.addEventListener("click",()=>showRenderHistory(history.dataset.clipId,history));
+  }
+  if(button.parentElement!==toolbar)toolbar.append(button);
+  if(history.parentElement!==toolbar)toolbar.append(history);
+  button.dataset.clipId=clipId;history.dataset.clipId=clipId;
  }
  async function render(){
   if(busy)return false;
