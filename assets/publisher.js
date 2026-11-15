@@ -1,6 +1,7 @@
 (() => {
  const $=s=>document.querySelector(s),esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- let state={connection:null,jobs:[],eligible:[],loading:false,profiles:[],activeProfileId:null,metrics:null,retention:null,activeTool:"calendar"};
+ let state={connection:null,jobs:[],eligible:[],loading:false,queueRefreshing:false,profiles:[],activeProfileId:null,metrics:null,retention:null,activeTool:"calendar",analyticsLoaded:false};
+ let publisherActive=false,refreshTimer=null;
  let calendarCursor=new Date();
  let selectedCalendarDay=localDayKey(new Date());
  const date=v=>{if(!v)return"Ready for automatic upload";const d=new Date(v);return Number.isNaN(d.getTime())?"—":d.toLocaleString([], {dateStyle:"medium",timeStyle:"short"});};
@@ -230,7 +231,10 @@
    button.classList.toggle("active",active);button.setAttribute("aria-selected",String(active));
   });
   root.querySelectorAll("[data-tool-panel]").forEach(panel=>panel.classList.toggle("hidden",panel.dataset.toolPanel!==state.activeTool));
-  renderCalendar();renderQualityChecklist();renderPerformanceRanking();renderNotifications();
+  if(state.activeTool==="calendar")renderCalendar();
+  else if(state.activeTool==="checklist")renderQualityChecklist();
+  else if(state.activeTool==="ranking")renderPerformanceRanking();
+  else if(state.activeTool==="notifications")renderNotifications();
  }
  function renderCalendar(){
   const grid=$("#publisher-calendar-grid");if(!grid)return;
@@ -336,17 +340,36 @@
   ensure();if(state.loading)return;state.loading=true;
   try{
    const [pub,review]=await Promise.all([fetch("/api/youtube",{headers:{accept:"application/json"}}),fetch("/api/review",{headers:{accept:"application/json"}})]);
-   const p=await pub.json();if(!pub.ok||!p.ok)throw new Error(p.error||"Could not load publisher.");
-   const r=await review.json();if(!review.ok||!r.ok)throw new Error(r.error||"Could not load approved renders.");
-   let b={profiles:[],activeProfileId:null};
-   try{const brands=await fetch("/api/workspace/brand-kit",{headers:{accept:"application/json"}});const data=await brands.json();if(brands.ok&&data.ok)b=data;else setMessage(data.error||"Brand Profiles unavailable. Apply migration 0017 to enable saved metadata templates.",true);}
+   const result=await pub.json();if(!pub.ok||!result.ok)throw new Error(result.error||"Could not load publisher.");
+   const reviewData=await review.json();if(!review.ok||!reviewData.ok)throw new Error(reviewData.error||"Could not load approved renders.");
+   let brandData={profiles:[],activeProfileId:null};
+   try{const brands=await fetch("/api/workspace/brand-kit",{headers:{accept:"application/json"}});const data=await brands.json();if(brands.ok&&data.ok)brandData=data;else setMessage(data.error||"Brand Profiles unavailable. Apply migration 0017 to enable saved metadata templates.",true);}
    catch{setMessage("Brand Profiles unavailable. Publisher queue remains usable; apply migration 0017 to enable saved metadata templates.",true);}
-   state.connection=p.connection;state.jobs=p.jobs||[];state.eligible=(r.items||[]).filter(x=>x.decision==="approved");state.profiles=b.profiles||[];state.activeProfileId=b.activeProfileId||null;
+   state.connection=result.connection;state.jobs=result.jobs||[];state.eligible=(reviewData.items||[]).filter(x=>x.decision==="approved");state.profiles=brandData.profiles||[];state.activeProfileId=brandData.activeProfileId||null;
    render();renderBrandProfileOptions();loadBrandTemplateFields();
-   loadMetrics();loadRetention();
+   if(!state.analyticsLoaded){
+    state.analyticsLoaded=true;
+    loadMetrics();
+    loadRetention();
+   }
   }catch(e){setMessage(e.message,true);}
   finally{state.loading=false;}
  }
+ async function refreshQueue(){
+  if(state.loading||state.queueRefreshing||document.hidden||!publisherActive)return;
+  state.queueRefreshing=true;
+  try{
+   const response=await fetch("/api/youtube",{headers:{accept:"application/json"},cache:"no-store"});
+   const data=await response.json();
+   if(!response.ok||!data.ok)throw new Error(data.error||"Could not refresh publishing queue.");
+   state.connection=data.connection;state.jobs=data.jobs||[];
+   render();
+  }catch(error){setMessage(error.message,true);}
+  finally{state.queueRefreshing=false;}
+ }
+ function stopPublisherRefresh(){if(refreshTimer!==null)window.clearInterval(refreshTimer);refreshTimer=null;}
+ function startPublisherRefresh(){stopPublisherRefresh();if(document.hidden||!publisherActive)return;refreshTimer=window.setInterval(refreshQueue,60000);}
+
  async function queue(e){
   e.preventDefault();if(!$("#publisher-clip").value)return;
   const btn=$("#publisher-submit");btn.disabled=true;btn.textContent="Queueing…";setMessage("");
@@ -368,8 +391,14 @@
   try{const response=await fetch("/api/youtube?id="+encodeURIComponent(id),{method:"DELETE"}),data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not delete failed job.");setMessage("Failed queue record deleted.");await load();}
   catch(e){setMessage(e.message,true);}
  }
- document.addEventListener("shortsflow:view",e=>{if(e.detail?.view==="publisher"){ensure();$("#publisher-workspace").classList.remove("hidden");load();}else $("#publisher-workspace")?.classList.add("hidden");});
+ document.addEventListener("shortsflow:view",e=>{
+  if(e.detail?.view==="publisher"){publisherActive=true;ensure();$("#publisher-workspace").classList.remove("hidden");load();startPublisherRefresh();}
+  else{publisherActive=false;stopPublisherRefresh();$("#publisher-workspace")?.classList.add("hidden");}
+ });
+ document.addEventListener("visibilitychange",()=>{
+  if(document.hidden)stopPublisherRefresh();
+  else if(publisherActive){refreshQueue();startPublisherRefresh();}
+ });
  ensure();
- setInterval(()=>{const panel=$("#publisher-workspace");if(panel&&!panel.classList.contains("hidden"))load();},15000);
  const params=new URLSearchParams(location.search);if(params.has("youtube")){const result=params.get("youtube"),reason=params.get("reason");history.replaceState({}, "", location.pathname);if(result==="connected")setTimeout(()=>{ensure();load();setMessage("YouTube channel connected successfully.");},0);else if(result!=="")setTimeout(()=>{ensure();const messages={denied:"Google connection was cancelled.",setup:"OAuth configuration is incomplete. Check the YouTube environment variables in Cloudflare Pages.", "invalid-state":"The Google sign-in session expired or did not match. Start Connect YouTube again.",token:"Google rejected the authorization-code exchange. Check the OAuth client ID, client secret, and exact redirect URI.", "channel-api":"Google sign-in succeeded, but YouTube Data API could not read the channel. Confirm YouTube Data API v3 is enabled in the same Google Cloud project.", "no-channel":"This Google account does not have an accessible YouTube channel. Create or select a YouTube channel, then reconnect.", "no-refresh-token":"Google did not provide a refresh token. Remove ShortsFlow access from your Google Account permissions, then connect again.", "encryption-key":"The token encryption key is invalid. Set YOUTUBE_TOKEN_ENCRYPTION_KEY to Base64 for exactly 32 random bytes in Pages.",database:"Google authorized the channel, but ShortsFlow could not save the connection in its database. Check the Pages D1 binding and migration 0012.",callback:"The OAuth callback failed unexpectedly. Check the Pages Function logs for youtube_oauth_callback."};setMessage(messages[reason]||"YouTube connection failed ("+(reason||"unknown")+"). Try connecting again.",true);},0);}
 })();

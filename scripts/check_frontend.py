@@ -4,7 +4,7 @@ import json
 import shlex
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = "20261115-publisher-suite3"
+BUILD = "20261115-publisher-lite1"
 
 class Assets(HTMLParser):
     def __init__(self):
@@ -73,6 +73,13 @@ if f'BUILD = "{BUILD}"' not in smoke_test:
     raise SystemExit("Production smoke-test build marker is out of sync with the frontend.");
 
 publisher_js = (ROOT / "assets/publisher.js").read_text(encoding="utf-8")
+publisher_addons = (ROOT / "assets/publisher-addons.js").read_text(encoding="utf-8")
+if "setInterval(refreshQueue,60000)" not in publisher_js:
+    raise SystemExit("Publisher polling must be throttled to queue-only refresh.")
+if "renderCalendar();renderQualityChecklist();renderPerformanceRanking();renderNotifications();" in publisher_js:
+    raise SystemExit("Publisher tabs must render lazily.")
+if "pageObserver.observe(page" in publisher_addons:
+    raise SystemExit("Publisher add-ons must not observe the entire page subtree.")
 for marker in ("publisher-calendar-grid", "publisher-checklist-items", "publisher-ranking-list", "publisher-export-csv", "publisher-notifications-list"):
     if marker not in publisher_js:
         raise SystemExit(f"Publisher workspace tool is missing: {marker}")
