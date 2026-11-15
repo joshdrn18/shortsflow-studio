@@ -4,7 +4,7 @@ import sqlite3
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
 
-expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql", "0016_workspace_brand_profiles.sql", "0017_brand_profile_metadata.sql", "0018_youtube_metric_snapshots.sql", "0019_youtube_retention_metrics.sql", "0020_background_render_jobs.sql", "0021_clip_score_breakdown.sql", "0022_autopilot.sql", "0023_content_factory_only.sql"]
+expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql", "0016_workspace_brand_profiles.sql", "0017_brand_profile_metadata.sql", "0018_youtube_metric_snapshots.sql", "0019_youtube_retention_metrics.sql", "0020_background_render_jobs.sql", "0021_clip_score_breakdown.sql", "0022_autopilot.sql", "0023_content_factory_only.sql", "0024_global_admin_roles.sql"]
 actual = [path.name for path in MIGRATIONS]
 if actual != expected:
     raise SystemExit(f"Unexpected migration sequence: {actual}")
@@ -104,10 +104,32 @@ autopilot_indexes = {row[1] for row in connection.execute("PRAGMA index_list(aut
 if "idx_autopilot_queue" not in autopilot_indexes or "idx_autopilot_workspace_day" not in autopilot_indexes:
     raise SystemExit("Autopilot queue indexes are missing")
 
+user_columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
+if "system_role" not in user_columns:
+    raise SystemExit("users.system_role is missing")
+
 connection.execute(
     "INSERT INTO users (id, email, display_name, password_hash) VALUES (?, ?, ?, ?)",
     ("user-test", "creator@example.com", "Creator", "test-hash"),
 )
+
+member_role = connection.execute(
+    "SELECT system_role FROM users WHERE id=?",
+    ("user-test",),
+).fetchone()
+if member_role != ("member",):
+    raise SystemExit(f"Workspace owners must not receive global admin access: {member_role}")
+
+connection.execute(
+    "INSERT INTO users (id, email, display_name, password_hash, system_role) VALUES (?, ?, ?, ?, 'admin')",
+    ("admin-test", "admin@example.com", "Admin", "test-hash"),
+)
+admin_role = connection.execute(
+    "SELECT system_role FROM users WHERE id=?",
+    ("admin-test",),
+).fetchone()
+if admin_role != ("admin",):
+    raise SystemExit(f"Global administrator role was not persisted: {admin_role}")
 connection.execute(
     "INSERT INTO workspaces (id, name) VALUES (?, ?)",
     ("workspace-test", "Creator workspace"),
