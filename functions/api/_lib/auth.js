@@ -106,7 +106,7 @@ export async function getSessionUser(request, env) {
   if (!token) return null;
   const tokenHash = await sha256(token);
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.display_name, u.status,
+    `SELECT u.id, u.email, u.display_name, u.status, u.system_role,
             w.id AS workspace_id, w.name AS workspace_name, wm.role,
             s.id AS session_id
      FROM user_sessions s
@@ -123,6 +123,7 @@ export async function getSessionUser(request, env) {
     id: row.id,
     email: row.email,
     displayName: row.display_name,
+    systemRole: row.system_role === "admin" ? "admin" : "member",
     workspace: row.workspace_id ? { id: row.workspace_id, name: row.workspace_name, role: row.role } : null
   };
 }
