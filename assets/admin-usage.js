@@ -2,6 +2,7 @@
   const $ = (selector) => document.querySelector(selector);
   let mounted = false;
   let loading = false;
+  let refreshTimer = null;
 
   const escapeHTML = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -26,7 +27,7 @@
     panel.className = "admin-usage-workspace hidden";
     panel.innerHTML = `
       <div class="admin-usage-heading">
-        <div><span class="admin-usage-kicker">ADMIN CONTROL CENTER</span><h2>AI Usage & Limits</h2><p>Monitor reserved AI budget, safety thresholds and quota errors for this ShortsFlow workspace.</p></div>
+        <div><span class="admin-usage-kicker">ADMIN CONTROL CENTER</span><h2>AI Usage & Limits</h2><p>Monitor reserved AI budget, safety thresholds and quota errors for this ShortsFlow workspace. Auto-refreshes every 60 seconds while open.</p></div>
         <button type="button" class="admin-usage-refresh" id="admin-usage-refresh">↻ Refresh usage</button>
       </div>
       <div class="admin-usage-content" id="admin-usage-content"><div class="admin-usage-loading">Loading usage ledger…</div></div>`;
@@ -139,12 +140,36 @@
     }
   }
 
+  function stopLiveRefresh() {
+    if (refreshTimer !== null) window.clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+  function startLiveRefresh() {
+    stopLiveRefresh();
+    if (document.hidden) return;
+    refreshTimer = window.setInterval(() => {
+      if (!document.hidden && !loading) load();
+    }, 60000);
+  }
+
   document.addEventListener("DOMContentLoaded", mount);
   document.addEventListener("shortsflow:view", (event) => {
-    if (event.detail?.view !== "admin") return;
+    if (event.detail?.view !== "admin") {
+      stopLiveRefresh();
+      return;
+    }
     mount();
     $("#admin-usage-workspace")?.classList.remove("hidden");
     load();
+    startLiveRefresh();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopLiveRefresh();
+    } else if (!$("#admin-usage-workspace")?.classList.contains("hidden")) {
+      load();
+      startLiveRefresh();
+    }
   });
   document.addEventListener("click", (event) => {
     if (event.target.closest("#admin-usage-retry")) load();
