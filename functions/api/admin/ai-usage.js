@@ -14,9 +14,8 @@ export async function onRequestGet({ request, env }) {
   const user = await getSessionUser(request, env);
   if (!user) return json({ ok: false, error: "Authentication required." }, 401);
 
-  const role = String(user.workspace?.role || "").toLowerCase();
-  if (!user.workspace?.id || !["owner", "admin"].includes(role)) {
-    return json({ ok: false, error: "Workspace owner or admin access is required." }, 403);
+  if (user.systemRole !== "admin" || !user.workspace?.id) {
+    return json({ ok: false, error: "Global administrator access is required." }, 403);
   }
 
   const workspaceId = user.workspace.id;
@@ -70,7 +69,7 @@ export async function onRequestGet({ request, env }) {
       ok: true,
       asOf: new Date().toISOString(),
       usageDateUTC: today,
-      workspace: { id: workspaceId, name: user.workspace.name, role },
+      workspace: { id: workspaceId, name: user.workspace.name, role: user.systemRole },
       internalBudget: {
         dailyLimit: SHORTSFLOW_DAILY_SAFETY_BUDGET,
         reservedNeurons,
