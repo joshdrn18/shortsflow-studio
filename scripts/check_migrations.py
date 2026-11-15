@@ -4,7 +4,7 @@ import sqlite3
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = sorted((ROOT / "migrations").glob("*.sql"))
 
-expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql", "0016_workspace_brand_profiles.sql", "0017_brand_profile_metadata.sql", "0018_youtube_metric_snapshots.sql", "0019_youtube_retention_metrics.sql", "0020_background_render_jobs.sql", "0021_clip_score_breakdown.sql", "0022_autopilot.sql", "0023_content_factory_only.sql", "0024_global_admin_roles.sql"]
+expected = ["0001_initial.sql", "0002_auth.sql", "0003_workspace_settings.sql", "0004_processing_jobs.sql", "0005_source_transcripts.sql", "0006_ai_usage_budget.sql", "0007_clip_discovery_idempotency.sql", "0008_clip_editing.sql", "0009_subtitle_settings.sql", "0010_render_assets.sql", "0011_review_asset_binding.sql", "0012_youtube_publisher.sql", "0013_watermark_positions.sql", "0014_ai_usage_reservation_ledger.sql", "0015_workspace_brand_kits.sql", "0016_workspace_brand_profiles.sql", "0017_brand_profile_metadata.sql", "0018_youtube_metric_snapshots.sql", "0019_youtube_retention_metrics.sql", "0020_background_render_jobs.sql", "0021_clip_score_breakdown.sql", "0022_autopilot.sql", "0023_content_factory_only.sql", "0024_global_admin_roles.sql", "0025_admin_controls.sql"]
 actual = [path.name for path in MIGRATIONS]
 if actual != expected:
     raise SystemExit(f"Unexpected migration sequence: {actual}")
@@ -49,6 +49,7 @@ required = {
     "autopilot_settings",
     "autopilot_jobs",
     "autopilot_daily_reports",
+    "admin_audit_logs",
 }
 missing = required - tables
 if missing:
