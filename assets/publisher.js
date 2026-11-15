@@ -1,6 +1,8 @@
 (() => {
  const $=s=>document.querySelector(s),esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- let state={connection:null,jobs:[],eligible:[],loading:false,profiles:[],activeProfileId:null,metrics:null};
+ let state={connection:null,jobs:[],eligible:[],loading:false,profiles:[],activeProfileId:null,metrics:null,retention:null,activeTool:"calendar"};
+ let calendarCursor=new Date();
+ let selectedCalendarDay=localDayKey(new Date());
  const date=v=>{if(!v)return"Ready for automatic upload";const d=new Date(v);return Number.isNaN(d.getTime())?"—":d.toLocaleString([], {dateStyle:"medium",timeStyle:"short"});};
  function ensure(){
   if($("#publisher-workspace"))return;
@@ -22,12 +24,61 @@
      <p id="publisher-message" class="publisher-message" role="status"></p>
     </form>
    </section>
-   <section class="publisher-section"><div class="publisher-section-head"><div><span class="publisher-kicker">PUBLISHING HISTORY</span><h3>Upload queue</h3><p>Track scheduled and completed YouTube jobs.</p></div><button class="text-button" id="publisher-refresh">↻ Refresh</button></div><div id="publisher-jobs" class="publisher-jobs"><div class="publisher-empty">Loading publishing history…</div></div></section>`;
+   <section class="publisher-section"><div class="publisher-section-head"><div><span class="publisher-kicker">PUBLISHING HISTORY</span><h3>Upload queue</h3><p>Track scheduled and completed YouTube jobs.</p></div><button class="text-button" id="publisher-refresh">↻ Refresh</button></div><div id="publisher-jobs" class="publisher-jobs"><div class="publisher-empty">Loading publishing history…</div></div></section>
+   <section class="publisher-section publisher-tools" id="publisher-tools">
+    <div class="publisher-section-head"><div><span class="publisher-kicker">PUBLISHER WORKSPACE</span><h3>Plan, review & monitor</h3><p>These tools read your existing publishing and library data. They do not create or publish jobs.</p></div></div>
+    <div class="publisher-tool-tabs" role="tablist" aria-label="Publisher tools">
+     <button type="button" class="publisher-tool-tab active" data-tool-tab="calendar" role="tab" aria-selected="true">Calendar</button>
+     <button type="button" class="publisher-tool-tab" data-tool-tab="checklist" role="tab" aria-selected="false">Pre-publish checklist</button>
+     <button type="button" class="publisher-tool-tab" data-tool-tab="ranking" role="tab" aria-selected="false">Performance ranking</button>
+     <button type="button" class="publisher-tool-tab" data-tool-tab="export" role="tab" aria-selected="false">Metadata export</button>
+     <button type="button" class="publisher-tool-tab" data-tool-tab="notifications" role="tab" aria-selected="false">Notifications <span id="publisher-notification-count">0</span></button>
+    </div>
+    <div class="publisher-tool-panel" data-tool-panel="calendar">
+     <div class="publisher-calendar-toolbar"><div><span class="publisher-kicker">PUBLISHING SCHEDULE</span><h4 id="publisher-calendar-month">—</h4></div><div class="publisher-calendar-actions"><button type="button" class="text-button" data-calendar-move="-1" aria-label="Previous month">←</button><button type="button" class="text-button" data-calendar-move="today">Today</button><button type="button" class="text-button" data-calendar-move="1" aria-label="Next month">→</button></div></div>
+     <div class="publisher-calendar-grid" id="publisher-calendar-grid" aria-label="Publishing calendar"></div>
+     <div class="publisher-calendar-day"><div class="publisher-calendar-day-head"><b id="publisher-calendar-selected-title">Selected day</b><small id="publisher-calendar-selected-count">0 items</small></div><div id="publisher-calendar-day-list" class="publisher-calendar-events"></div></div>
+     <small class="publisher-tool-note">Calendar dates come from the current queue’s scheduled_at / created_at timestamps. It does not change an upload schedule.</small>
+    </div>
+    <div class="publisher-tool-panel hidden" data-tool-panel="checklist">
+     <div class="publisher-checklist-head"><div><span class="publisher-kicker">LOCAL PREFLIGHT</span><h4>Check this upload before queueing</h4><p>Choose a render and edit the upload form above. This checklist is informational; the server still rechecks the latest approval when you submit.</p></div><span id="publisher-checklist-status" class="publisher-checklist-status">Waiting</span></div>
+     <div id="publisher-checklist-items" class="publisher-checklist-items"></div>
+    </div>
+    <div class="publisher-tool-panel hidden" data-tool-panel="ranking">
+     <div class="publisher-calendar-toolbar"><div><span class="publisher-kicker">CHANNEL PERFORMANCE</span><h4>Top published Shorts</h4><p>Ranked by the latest available lifetime view-count snapshots.</p></div><span id="publisher-ranking-updated" class="publisher-tool-muted">Not synced yet</span></div>
+     <div id="publisher-ranking-list" class="publisher-ranking-list"><div class="publisher-empty">Load YouTube metrics to see the ranking.</div></div>
+     <small class="publisher-tool-note">Views, likes and comments are Data API lifetime totals for the published videos returned by the existing analytics endpoint. Average viewed is shown only when YouTube Analytics has a value for that video.</small>
+    </div>
+    <div class="publisher-tool-panel hidden" data-tool-panel="export">
+     <div class="publisher-export-card"><div><span class="publisher-kicker">CONTENT LIBRARY · CSV</span><h4>Export publish-ready metadata</h4><p>Download titles, descriptions, tags, hashtags, hooks and source information from your existing Content Library. No videos are downloaded or uploaded.</p></div><label class="publisher-export-option"><input type="checkbox" id="publisher-export-include-old"> Include previous metadata versions</label><button type="button" class="primary-button" id="publisher-export-csv">Export metadata CSV <span>↓</span></button><small id="publisher-export-status" class="publisher-tool-note">Default export includes current, publish-ready versions only.</small></div>
+    </div>
+    <div class="publisher-tool-panel hidden" data-tool-panel="notifications">
+     <div class="publisher-calendar-toolbar"><div><span class="publisher-kicker">QUEUE ACTIVITY</span><h4>Publishing notifications</h4><p>Alerts are derived from existing job statuses; no new notification service or polling loop is added.</p></div><button type="button" class="text-button" id="publisher-notifications-refresh">↻ Refresh list</button></div>
+     <div id="publisher-notifications-list" class="publisher-notifications-list"><div class="publisher-empty">No publishing activity yet.</div></div>
+    </div>
+   </section>`;
   $(".page-content")?.append(panel);
   $("#youtube-connect").addEventListener("click",e=>{e.preventDefault();window.location.href="/api/youtube/connect";});
   $("#publisher-refresh").addEventListener("click",load);
+  $("#publisher-tools").addEventListener("click",event=>{
+   const tab=event.target.closest("[data-tool-tab]");
+   if(tab){state.activeTool=tab.dataset.toolTab;renderPublisherTools();return;}
+   const move=event.target.closest("[data-calendar-move]");
+   if(move){
+    const value=move.dataset.calendarMove;
+    if(value==="today"){calendarCursor=new Date();selectedCalendarDay=localDayKey(new Date());}
+    else calendarCursor=new Date(calendarCursor.getFullYear(),calendarCursor.getMonth()+Number(value),1);
+    renderCalendar();return;
+   }
+   const day=event.target.closest("[data-calendar-day]");
+   if(day){selectedCalendarDay=day.dataset.calendarDay;renderCalendar();}
+  });
+  $("#publisher-export-csv").addEventListener("click",exportPublisherMetadata);
+  $("#publisher-notifications-refresh").addEventListener("click",renderNotifications);
+  $("#publisher-form").addEventListener("input",renderQualityChecklist);
+  $("#publisher-form").addEventListener("change",renderQualityChecklist);
   $("#publisher-metrics-sync").addEventListener("click",syncMetrics);
-   $("#publisher-clip").addEventListener("change",()=>{const item=state.eligible.find(x=>x.clipId===$("#publisher-clip").value);if(item){$("#publisher-title").value=item.title||"";$("#publisher-description").value=item.caption||"";}renderMetadataPreview();});
+   $("#publisher-clip").addEventListener("change",()=>{const item=state.eligible.find(x=>x.clipId===$("#publisher-clip").value);if(item){$("#publisher-title").value=item.title||"";$("#publisher-description").value=item.caption||"";}renderMetadataPreview();renderQualityChecklist();});
   $("#publisher-brand-profile").addEventListener("change",loadBrandTemplateFields);
   $("#publisher-brand-save").addEventListener("click",saveBrandTemplate);
   $("#publisher-brand-apply").addEventListener("click",applyBrandTemplate);
@@ -89,6 +140,7 @@
    if(!response.ok||!data.ok)throw new Error(data.error||"Retention metrics unavailable.");
    state.retention=data;
    $("#publisher-retention-average").textContent=Number(data.averageViewPercentage||0).toFixed(1)+"%";
+   renderPerformanceRanking();
    $("#publisher-retention-count").textContent=metricNumber(data.measuredCount);
    const measured=(data.videos||[]).filter(v=>v.average_view_duration!==null&&v.average_view_duration!==undefined);
    const average=measured.length?measured.reduce((sum,v)=>sum+Number(v.average_view_duration||0),0)/measured.length:0;
@@ -115,6 +167,7 @@
    const top=(data.videos||[]).filter(v=>v.views!==null&&v.views!==undefined).sort((a,b)=>Number(b.views)-Number(a.views)).slice(0,5);
    views.innerHTML=top.length?top.map((v,i)=>'<article class="publisher-metric-video"><span class="publisher-metric-rank">'+(i+1)+'</span><div><b>'+esc(v.title||v.clip_title||"YouTube Short")+'</b><small>'+esc(v.source_title||"")+'</small></div><strong>'+metricNumber(v.views)+' views</strong>'+(v.platform_url?'<a href="'+esc(v.platform_url)+'" target="_blank" rel="noopener">Watch ↗</a>':"")+'</article>').join(""):'<div class="publisher-empty">No published video metrics yet. Publish a Short, then sync again.</div>';
    const note=$(".publisher-metric-note");if(note)note.textContent=data.note||"Metrics are provided by YouTube Data API.";
+   renderPerformanceRanking();
   }catch(error){views.innerHTML='<div class="publisher-empty">'+esc(error.message)+"</div>";}
  }
  async function syncMetrics(){
@@ -156,11 +209,129 @@
   if(state.eligible.some(x=>x.clipId===current))select.value=current;
   $("#publisher-submit").disabled=!c?.connected||!state.eligible.length;
   const list=$("#publisher-jobs");
-  if(!state.jobs.length){list.innerHTML='<div class="publisher-empty">No publishing jobs yet. Approved clips will appear in the planner above.</div>';return;}
-  list.innerHTML=state.jobs.map(j=>{const status=String(j.status||"").trim().toLowerCase();return '<article class="publisher-job"><div class="publisher-job-main"><b>'+esc(j.title||j.clip_title||"YouTube Short")+'</b><span>'+esc(date(j.scheduled_at))+'</span>'+(status==="failed"&&j.last_error?'<small class="publisher-error-detail">'+esc(j.last_error)+'</small>':"")+'</div><span class="publisher-status status-'+esc(status)+'">'+esc(status||"unknown")+'</span>'+(j.platform_url?'<a href="'+esc(j.platform_url)+'" target="_blank" rel="noopener">Watch ↗</a>':"")+(status==="queued"?'<button class="text-button" data-cancel="'+esc(j.id)+'">Cancel</button>':"")+(status==="failed"?'<button class="publisher-delete-button" data-delete="'+esc(j.id)+'" aria-label="Delete failed publishing job">Delete failed job</button>':"")+'</article>'}).join("");
-  list.querySelectorAll("[data-cancel]").forEach(btn=>btn.addEventListener("click",()=>cancel(btn.dataset.cancel)));
-  list.querySelectorAll("[data-delete]").forEach(btn=>btn.addEventListener("click",()=>removeFailed(btn.dataset.delete)));
+  if(!state.jobs.length){list.innerHTML='<div class="publisher-empty">No publishing jobs yet. Approved clips will appear in the planner above.</div>';}
+  else{
+   list.innerHTML=state.jobs.map(j=>{const status=String(j.status||"").trim().toLowerCase();return '<article class="publisher-job"><div class="publisher-job-main"><b>'+esc(j.title||j.clip_title||"YouTube Short")+'</b><span>'+esc(date(j.scheduled_at))+'</span>'+(status==="failed"&&j.last_error?'<small class="publisher-error-detail">'+esc(j.last_error)+'</small>':"")+'</div><span class="publisher-status status-'+esc(status)+'">'+esc(status||"unknown")+'</span>'+(j.platform_url?'<a href="'+esc(j.platform_url)+'" target="_blank" rel="noopener">Watch ↗</a>':"")+(status==="queued"?'<button class="text-button" data-cancel="'+esc(j.id)+'">Cancel</button>':"")+(status==="failed"?'<button class="publisher-delete-button" data-delete="'+esc(j.id)+'" aria-label="Delete failed publishing job">Delete failed job</button>':"")+'</article>'}).join("");
+   list.querySelectorAll("[data-cancel]").forEach(btn=>btn.addEventListener("click",()=>cancel(btn.dataset.cancel)));
+   list.querySelectorAll("[data-delete]").forEach(btn=>btn.addEventListener("click",()=>removeFailed(btn.dataset.delete)));
+  }
+  renderPublisherTools();
  }
+
+ function localDayKey(value){
+  const d=value instanceof Date?value:new Date(value);
+  if(Number.isNaN(d.getTime()))return "";
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+ }
+ function renderPublisherTools(){
+  const root=$("#publisher-tools");if(!root)return;
+  root.querySelectorAll("[data-tool-tab]").forEach(button=>{
+   const active=button.dataset.toolTab===state.activeTool;
+   button.classList.toggle("active",active);button.setAttribute("aria-selected",String(active));
+  });
+  root.querySelectorAll("[data-tool-panel]").forEach(panel=>panel.classList.toggle("hidden",panel.dataset.toolPanel!==state.activeTool));
+  renderCalendar();renderQualityChecklist();renderPerformanceRanking();renderNotifications();
+ }
+ function renderCalendar(){
+  const grid=$("#publisher-calendar-grid");if(!grid)return;
+  const year=calendarCursor.getFullYear(),month=calendarCursor.getMonth();
+  $("#publisher-calendar-month").textContent=new Intl.DateTimeFormat(undefined,{month:"long",year:"numeric"}).format(calendarCursor);
+  const first=new Date(year,month,1),start=new Date(year,month,1-first.getDay());
+  const weekdays=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  const cells=weekdays.map(day=>'<div class="publisher-calendar-weekday">'+day+'</div>');
+  const grouped=new Map();
+  for(const job of state.jobs){
+   const key=localDayKey(job.scheduled_at||job.created_at);if(!key)continue;
+   if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(job);
+  }
+  for(let i=0;i<42;i++){
+   const day=new Date(start.getFullYear(),start.getMonth(),start.getDate()+i),key=localDayKey(day),items=grouped.get(key)||[];
+   const outside=day.getMonth()!==month,selected=key===selectedCalendarDay,today=key===localDayKey(new Date());
+   cells.push('<button type="button" class="publisher-calendar-day-cell'+(outside?' outside':'')+(selected?' selected':'')+(today?' today':'')+'" data-calendar-day="'+key+'"><span>'+day.getDate()+'</span><small>'+items.length+'</small>'+items.slice(0,2).map(job=>'<i class="publisher-calendar-dot status-'+esc(String(job.status||"").toLowerCase())+'">'+esc(job.title||job.clip_title||"YouTube Short")+'</i>').join("")+(items.length>2?'<em>+'+(items.length-2)+' more</em>':"")+'</button>');
+  }
+  grid.innerHTML=cells.join("");
+  let selectedDate=new Date(selectedCalendarDay+"T12:00:00");
+  if(Number.isNaN(selectedDate.getTime()))selectedDate=new Date(year,month,1);
+  $("#publisher-calendar-selected-title").textContent=selectedDate.toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric",year:"numeric"});
+  const selectedItems=grouped.get(selectedCalendarDay)||[];
+  $("#publisher-calendar-selected-count").textContent=selectedItems.length+" item"+(selectedItems.length===1?"":"s");
+  const list=$("#publisher-calendar-day-list");
+  list.innerHTML=selectedItems.length?selectedItems.map(job=>'<article class="publisher-calendar-event"><div><b>'+esc(job.title||job.clip_title||"YouTube Short")+'</b><small>'+esc(date(job.scheduled_at||job.created_at))+'</small></div><span class="publisher-status status-'+esc(String(job.status||"unknown").toLowerCase())+'">'+esc(job.status||"unknown")+'</span>'+(job.platform_url?'<a href="'+esc(job.platform_url)+'" target="_blank" rel="noopener">Watch ↗</a>':"")+'</article>').join(""):'<div class="publisher-empty">No publishing jobs on this day.</div>';
+ }
+ function renderQualityChecklist(){
+  const list=$("#publisher-checklist-items");if(!list)return;
+  const clipId=$("#publisher-clip")?.value||"",item=state.eligible.find(x=>x.clipId===clipId);
+  const title=$("#publisher-title")?.value.trim()||"",description=$("#publisher-description")?.value||"",tags=($("#publisher-tags")?.value||"").split(",").map(v=>v.trim()).filter(Boolean);
+  const tagLength=tags.join(", ").length,schedule=$("#publisher-schedule")?.value||"",scheduledDate=schedule?new Date(schedule):null;
+  const scheduleOk=!schedule||(scheduledDate&&Number.isFinite(scheduledDate.getTime())&&scheduledDate.getTime()>=Date.now()+60000);
+  const checks=[
+   ["Current approved render",Boolean(item),item?"Approved render selected":"Select a render approved in Review Center"],
+   ["YouTube channel",Boolean(state.connection?.connected),state.connection?.connected?"Channel connected":"Connect a YouTube channel"],
+   ["Title",title.length>=1&&title.length<=100,title.length+"/100 characters"],
+   ["Description",description.length<=5000,description.length+"/5000 characters"],
+   ["Tags",tags.length<=30&&tagLength<=500,tags.length+" tags · "+tagLength+"/500 characters"],
+   ["Schedule",Boolean(scheduleOk),!schedule?"Publish as soon as the queue runs":scheduleOk?"Scheduled time is at least one minute ahead":"Choose a future time at least one minute ahead"],
+   ["Visibility",["private","unlisted","public"].includes($("#publisher-privacy")?.value),($("#publisher-privacy")?.value||"private")+" visibility"]
+  ];
+  const passed=checks.filter(x=>x[1]).length;
+  const status=$("#publisher-checklist-status");
+  status.textContent=passed+"/"+checks.length+" checks passed";
+  status.classList.toggle("ready",passed===checks.length);
+  list.innerHTML=checks.map(check=>'<article class="publisher-check-item '+(check[1]?"passed":"pending")+'"><span class="publisher-check-icon">'+(check[1]?"✓":"!")+'</span><div><b>'+esc(check[0])+'</b><small>'+esc(check[2])+'</small></div><strong>'+(check[1]?"Ready":"Check")+'</strong></article>').join("");
+ }
+ function renderPerformanceRanking(){
+  const list=$("#publisher-ranking-list");if(!list)return;
+  const videos=(state.metrics?.videos||[]).filter(video=>video.views!==null&&video.views!==undefined).slice().sort((a,b)=>Number(b.views)-Number(a.views)).slice(0,10);
+  const retention=new Map((state.retention?.videos||[]).map(video=>[video.job_id,video]));
+  $("#publisher-ranking-updated").textContent=state.metrics?.lastSyncedAt?"Synced "+date(state.metrics.lastSyncedAt):"Not synced yet";
+  list.innerHTML=videos.length?videos.map((video,index)=>{
+   const retentionRow=retention.get(video.job_id),percentage=retentionRow?.average_view_percentage;
+   const url=typeof video.platform_url==="string"&&/^https:\/\/(www\.)?youtube\.com\//i.test(video.platform_url)?video.platform_url:"";
+   return '<article class="publisher-ranking-row"><span class="publisher-metric-rank">'+(index+1)+'</span><div class="publisher-ranking-main"><b>'+esc(video.title||video.clip_title||"YouTube Short")+'</b><small>'+esc(video.source_title||"")+'</small></div><strong>'+metricNumber(video.views)+' <small>views</small></strong><span class="publisher-ranking-secondary">'+metricNumber(video.likes)+' likes · '+metricNumber(video.comments)+' comments</span><span class="publisher-ranking-secondary">'+(percentage===null||percentage===undefined?"—":Number(percentage).toFixed(1)+"% viewed")+'</span>'+(url?'<a href="'+esc(url)+'" target="_blank" rel="noopener">Watch ↗</a>':"")+'</article>';
+  }).join(""):'<div class="publisher-empty">No published video snapshots yet. Use “Sync views” in the growth tracker above.</div>';
+ }
+ function renderNotifications(){
+  const list=$("#publisher-notifications-list");if(!list)return;
+  const jobs=state.jobs||[],entries=[];
+  for(const job of jobs){
+   const status=String(job.status||"").toLowerCase();
+   if(status==="failed")entries.push({job,kind:"Failed upload",detail:job.last_error||"The upload failed. Review the job before retrying.",when:job.updated_at||job.created_at,priority:0});
+   else if(status==="published")entries.push({job,kind:"Published successfully",detail:"Your Short is available on YouTube.",when:job.updated_at||job.created_at,priority:1});
+   else if(["queued","uploading","processing"].includes(status))entries.push({job,kind:status==="queued"?"Upload queued":status==="uploading"?"Upload in progress":"Upload processing",detail:job.scheduled_at?"Scheduled / queue time: "+date(job.scheduled_at):"Publishing job is active.",when:job.updated_at||job.created_at,priority:2});
+  }
+  entries.sort((a,b)=>new Date(b.when||0)-new Date(a.when||0));
+  const recent=entries.slice(0,20),attention=jobs.filter(job=>String(job.status||"").toLowerCase()==="failed").length;
+  $("#publisher-notification-count").textContent=String(attention);
+  list.innerHTML=recent.length?recent.map(entry=>'<article class="publisher-notification '+(entry.priority===0?"is-warning":entry.priority===1?"is-success":"")+'"><span class="publisher-notification-mark">'+(entry.priority===0?"!":entry.priority===1?"✓":"◷")+'</span><div><b>'+esc(entry.kind)+' · '+esc(entry.job.title||entry.job.clip_title||"YouTube Short")+'</b><small>'+esc(entry.detail)+'</small><time>'+esc(date(entry.when))+'</time></div><span class="publisher-status status-'+esc(String(entry.job.status||"unknown").toLowerCase())+'">'+esc(entry.job.status||"unknown")+'</span></article>').join(""):'<div class="publisher-empty">No queued, failed or published activity yet.</div>';
+ }
+ function csvCell(value){
+  let text=Array.isArray(value)?value.join(", "):value===null||value===undefined?"":String(value);
+  return '"'+text.replace(/"/g,'""')+'"';
+ }
+ async function exportPublisherMetadata(){
+  const button=$("#publisher-export-csv"),status=$("#publisher-export-status");
+  button.disabled=true;button.textContent="Preparing CSV…";status.textContent="Reading your existing Content Library…";
+  try{
+   const response=await fetch("/api/library",{headers:{accept:"application/json"}});
+   const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not read Content Library.");
+   const includeOld=$("#publisher-export-include-old").checked;
+   const assets=(data.assets||[]).filter(asset=>asset.isPublishReady&&(includeOld||asset.isCurrent));
+   if(!assets.length)throw new Error("No publish-ready metadata packages match this export filter.");
+   const headers=["title","description","hashtags","tags","hook","voice_script","source_title","source_references","clip_id","asset_id","render_version","metadata_version","current_version","is_current","duration_seconds","publish_ready"];
+   const rows=assets.map(asset=>[
+    asset.title,asset.platformDescription,asset.hashtags,(asset.platformTags||[]),asset.hook,asset.spokenScript,asset.sourceTitle,
+    (asset.sourceReferences||[]).map(source=>(source.publisher?source.publisher+": ":"")+(source.url||source.title||"")).join(" | "),
+    asset.clipId,asset.id,asset.version,asset.metadataVersion,asset.currentMetadataVersion,asset.isCurrent?"yes":"no",asset.durationSeconds,"yes"
+   ]);
+   const csv="\uFEFF"+[headers,...rows].map(row=>row.map(csvCell).join(",")).join("\r\n");
+   const blob=new Blob([csv],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),anchor=document.createElement("a");
+   anchor.href=url;anchor.download="shortsflow-publisher-metadata-"+new Date().toISOString().slice(0,10)+".csv";
+   document.body.append(anchor);anchor.click();anchor.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+   status.textContent="Exported "+assets.length+" metadata package"+(assets.length===1?"":"s")+". No video files were included.";
+  }catch(error){status.textContent=error.message||"Metadata export failed.";setMessage(status.textContent,true);}
+  finally{button.disabled=false;button.innerHTML='Export metadata CSV <span>↓</span>';}
+ }
+
  async function load(){
   ensure();if(state.loading)return;state.loading=true;
   try{
