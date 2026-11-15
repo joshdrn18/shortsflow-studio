@@ -4,7 +4,7 @@ import json
 import shlex
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = "20261115-ui4"
+BUILD = "20261115-ui5"
 
 class Assets(HTMLParser):
     def __init__(self):
@@ -49,5 +49,15 @@ if f"UI build {BUILD}" not in html:
     raise SystemExit("Visible UI build marker is missing.")
 compile((ROOT / "scripts/background_render.py").read_text(encoding="utf-8"), "scripts/background_render.py", "exec")
 compile((ROOT / "scripts/test_background_render.py").read_text(encoding="utf-8"), "scripts/test_background_render.py", "exec")
+app_js = (ROOT / "assets/app.js").read_text(encoding="utf-8")
+admin_api = (ROOT / "functions/api/admin/ai-usage.js").read_text(encoding="utf-8")
+auth_lib = (ROOT / "functions/api/_lib/auth.js").read_text(encoding="utf-8")
+if 'user?.systemRole === "admin"' not in app_js:
+    raise SystemExit("Admin navigation must use global admin role, not workspace ownership.")
+if 'user.systemRole !== "admin"' not in admin_api:
+    raise SystemExit("Admin API must require the global administrator role.")
+if "u.system_role" not in auth_lib:
+    raise SystemExit("Session lookup must load the global administrator role.")
+print("OK: global admin access is separate from workspace owner permissions.")
 print("OK: background FFmpeg runner Python syntax is valid.")
 print(f"OK: {len(parser.paths)} linked assets exist; cache versions match {BUILD}; all {len(actual)} JavaScript files are syntax-checked.")
