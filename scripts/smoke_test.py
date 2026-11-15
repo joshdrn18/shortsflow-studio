@@ -7,7 +7,7 @@ import os
 import time
 
 BASE_URL = os.environ.get("SHORTSFLOW_BASE_URL", "https://shortsflow-studio.pages.dev").rstrip("/")
-BUILD = "20261115-admin2"
+BUILD = "20261115-publisher-suite1"
 TIMEOUT_SECONDS = 240
 RETRY_SECONDS = 5
 
@@ -76,6 +76,8 @@ for value in parser.urls:
 
 if not asset_paths:
     raise SystemExit("No versioned frontend assets were found in the production HTML.")
+if "/assets/publisher.js" not in [urlsplit(value).path for value in parser.urls]:
+    raise SystemExit("Publisher workspace script is missing from production HTML.")
 
 for path in asset_paths:
     status, asset_headers, _ = get(path)

@@ -64,6 +64,10 @@ if 'user.systemRole !== "admin"' not in admin_overview_api:
     raise SystemExit("Admin overview API must require the global administrator role.")
 if "publisher.js" not in html or 'publisher: ["Publisher"' not in app_js:
     raise SystemExit("Publisher navigation or script is not wired into the application.")
+smoke_test = (ROOT / "scripts/smoke_test.py").read_text(encoding="utf-8")
+if f'BUILD = "{BUILD}"' not in smoke_test:
+    raise SystemExit("Production smoke-test build marker is out of sync with the frontend.");
+
 publisher_js = (ROOT / "assets/publisher.js").read_text(encoding="utf-8")
 for marker in ("publisher-calendar-grid", "publisher-checklist-items", "publisher-ranking-list", "publisher-export-csv", "publisher-notifications-list"):
     if marker not in publisher_js:
