@@ -65,7 +65,7 @@ if 'user.systemRole !== "admin"' not in admin_overview_api:
 if "admin-control.js" not in html or "admin-control.css" not in html or "admin-actions.js" not in html or "admin-actions.css" not in html:
     raise SystemExit("Admin control center assets are not linked.")
 print("OK: global admin access is separate from workspace owner permissions.")
-if 'user.systemRole !== "admin"' not in admin_actions_api:
+if 'admin.systemRole !== "admin"' not in admin_actions_api:
     raise SystemExit("Admin actions endpoint must require the global administrator role.")
 print("OK: admin control center API and assets are protected and linked.")
 print("OK: background FFmpeg runner Python syntax is valid.")
