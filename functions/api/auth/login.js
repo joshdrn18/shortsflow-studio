@@ -21,7 +21,7 @@ export async function onRequestPost({ request, env }) {
   }
 
   const user = await env.DB.prepare(
-    "SELECT id, email, display_name, password_hash, status FROM users WHERE email = ? COLLATE NOCASE"
+    "SELECT id, email, display_name, password_hash, status, system_role FROM users WHERE email = ? COLLATE NOCASE"
   ).bind(email).first();
 
   const valid = user && user.status === "active" && await verifyPassword(password, user.password_hash);
@@ -48,6 +48,7 @@ export async function onRequestPost({ request, env }) {
       id: user.id,
       email: user.email,
       displayName: user.display_name,
+      systemRole: user.system_role === "admin" ? "admin" : "member",
       workspace: workspace ? { id: workspace.id, name: workspace.name, role: workspace.role } : null
     }
   }, 200, { "Set-Cookie": session.cookie });
