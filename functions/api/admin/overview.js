@@ -14,7 +14,7 @@ export async function onRequestGet({ request, env }) {
   try {
     const db = env.DB;
     const [
-      totals, jobCounts, renderCounts, autopilotCounts, members, processing, renders, autopilot, activity
+      totals, jobCounts, renderCounts, autopilotCounts, members, processing, renders, autopilot, activity, autopilotSettings, adminAudit
     ] = await Promise.all([
       db.prepare(`SELECT
         (SELECT COUNT(*) FROM users) AS users,
@@ -52,7 +52,11 @@ export async function onRequestGet({ request, env }) {
       db.prepare(`SELECT a.id, a.event, a.entity_type, a.entity_id, a.details, a.created_at,
         w.name AS workspace
         FROM activity_logs a JOIN workspaces w ON w.id=a.workspace_id
-        ORDER BY a.created_at DESC LIMIT 40`).all()
+        ORDER BY a.created_at DESC LIMIT 40`).all(),
+      db.prepare(`SELECT w.id AS workspace_id,w.name,COALESCE(s.enabled,0) AS enabled,COALESCE(s.daily_target,3) AS daily_target
+        FROM workspaces w LEFT JOIN autopilot_settings s ON s.workspace_id=w.id ORDER BY w.created_at DESC LIMIT 100`).all(),
+      db.prepare(`SELECT a.id,a.action,a.target_type,a.target_id,a.details_json,a.created_at,u.email AS admin_email
+        FROM admin_audit_logs a JOIN users u ON u.id=a.admin_user_id ORDER BY a.created_at DESC LIMIT 40`).all()
     ]);
 
     const jobs = [
@@ -72,7 +76,9 @@ export async function onRequestGet({ request, env }) {
       },
       members: members.results || [],
       jobs,
-      activity: activity.results || []
+      activity: activity.results || [],
+      autopilotSettings: autopilotSettings.results || [],
+      adminAudit: adminAudit.results || []
     });
   } catch (error) {
     console.error("admin_overview_failed", error);
