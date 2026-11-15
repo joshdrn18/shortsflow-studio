@@ -37,11 +37,11 @@ export async function onRequestGet({ request, env }) {
         LEFT JOIN workspaces w ON w.id=wm.workspace_id
         GROUP BY u.id
         ORDER BY u.created_at DESC LIMIT 100`).all(),
-      db.prepare(`SELECT j.id, j.job_type AS type, j.status, j.attempts, j.last_error AS error,
+      db.prepare(`SELECT j.id, j.job_type AS type, 'processing' AS queue_type, j.status, j.attempts, j.last_error AS error,
         j.created_at, j.updated_at, w.name AS workspace
         FROM processing_jobs j JOIN workspaces w ON w.id=j.workspace_id
         ORDER BY j.updated_at DESC LIMIT 20`).all(),
-      db.prepare(`SELECT j.id, 'render' AS type, j.status, j.attempts, j.last_error AS error,
+      db.prepare(`SELECT j.id, 'render' AS type, 'render' AS queue_type, j.status, j.attempts, j.last_error AS error,
         j.created_at, j.updated_at, w.name AS workspace
         FROM clip_render_jobs j JOIN workspaces w ON w.id=j.workspace_id
         ORDER BY j.updated_at DESC LIMIT 20`).all(),
