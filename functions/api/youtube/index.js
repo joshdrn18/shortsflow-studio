@@ -46,9 +46,10 @@ export async function onRequestPost({request,env}){
     MIN(candidate.end_seconds,source_clip.end_seconds)-MAX(candidate.start_seconds,source_clip.start_seconds) AS overlap_seconds
    FROM clips source_clip
    JOIN clips candidate ON candidate.source_video_id=source_clip.source_video_id
-    AND candidate.workspace_id=source_clip.workspace_id AND candidate.id<>source_clip.id
+    AND candidate.workspace_id=source_clip.workspace_id
    JOIN publishing_jobs job ON job.clip_id=candidate.id AND job.platform='youtube'
     AND job.status IN ('queued','uploading','processing','published')
+    AND job.render_asset_id<>?
    LEFT JOIN clip_metadata meta ON meta.clip_id=candidate.id
     AND meta.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=candidate.id)
    WHERE source_clip.id=? AND source_clip.workspace_id=?
@@ -56,7 +57,7 @@ export async function onRequestPost({request,env}){
     AND MIN(candidate.end_seconds,source_clip.end_seconds)-MAX(candidate.start_seconds,source_clip.start_seconds)
       >=0.9*MIN(candidate.end_seconds-candidate.start_seconds,source_clip.end_seconds-source_clip.start_seconds)
    ORDER BY job.created_at DESC LIMIT 1
-  `).bind(clipId,user.workspace.id).first();
+  `).bind(clipId,user.workspace.id,clip.asset_id).first();
   if(overlap&&body?.allowDuplicateOverlap!==true)return json({ok:false,code:"CLIP_OVERLAP",error:"This clip strongly overlaps a segment that is already queued or published.",conflict:{clipId:overlap.clip_id,title:overlap.title,status:overlap.status,startSeconds:Number(overlap.start_seconds),endSeconds:Number(overlap.end_seconds),overlapSeconds:Number(overlap.overlap_seconds),platformUrl:overlap.platform_url||null}},409);
   const id=crypto.randomUUID(),now=new Date().toISOString(),when=scheduledAt?scheduledAt.toISOString():now;
   await env.DB.prepare(`INSERT INTO publishing_jobs (id,clip_id,review_id,platform,status,scheduled_at,created_at,updated_at,render_asset_id,metadata_version,title,description,privacy_status,tags_json)
