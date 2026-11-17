@@ -7,14 +7,30 @@ export async function onRequestGet({ request, env }) {
   const user = await getSessionUser(request, env);
   if (!user) return json({ ok: false, error: "Authentication required." }, 401);
   if (!user.workspace?.id) return json({ ok: false, error: "No workspace is assigned to this account." }, 403);
+  const sourceId = new URL(request.url).searchParams.get("sourceId");
+  if (sourceId && !/^[0-9a-f-]{36}$/i.test(sourceId)) {
+    return json({ ok: false, error: "Invalid source video ID." }, 400);
+  }
   try {
-    const result = await env.DB.prepare(
-      `SELECT j.id, j.source_video_id, s.title AS source_title, j.job_type, j.status,
-              j.attempts, j.max_attempts, j.last_error, j.created_at, j.updated_at
+    const query = `SELECT j.id, j.source_video_id, s.title AS source_title, j.job_type, j.status,
+              j.attempts, j.max_attempts, j.last_error, j.created_at, j.updated_at, j.payload_json
        FROM processing_jobs j JOIN source_videos s ON s.id = j.source_video_id
-       WHERE j.workspace_id = ? ORDER BY j.created_at DESC LIMIT 50`
-    ).bind(user.workspace.id).all();
-    return json({ ok: true, jobs: result.results || [] });
+       WHERE j.workspace_id = ? ${sourceId ? "AND j.source_video_id = ?" : ""}
+       ORDER BY j.created_at DESC LIMIT ${sourceId ? 20 : 50}`;
+    const result = sourceId
+      ? await env.DB.prepare(query).bind(user.workspace.id, sourceId).all()
+      : await env.DB.prepare(query).bind(user.workspace.id).all();
+    const jobs = (result.results || []).map(row => {
+      let payload = {};
+      try { payload = JSON.parse(row.payload_json || "{}"); } catch {}
+      const { payload_json, ...safe } = row;
+      return {
+        ...safe,
+        progressChunks: Math.max(0, Number(payload.chunkIndex || 0)),
+        totalChunks: Math.max(0, Number(payload.totalChunks || 0))
+      };
+    });
+    return json({ ok: true, jobs });
   } catch {
     return json({ ok: false, error: "Could not load processing jobs. Apply migration 0004." }, 503);
   }
