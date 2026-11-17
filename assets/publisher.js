@@ -31,6 +31,7 @@
      <button type="button" class="publisher-tool-tab active" data-tool-tab="calendar" role="tab" aria-selected="true">Calendar</button>
      <button type="button" class="publisher-tool-tab" data-tool-tab="checklist" role="tab" aria-selected="false">Pre-publish checklist</button>
      <button type="button" class="publisher-tool-tab" data-tool-tab="ranking" role="tab" aria-selected="false">Performance ranking</button>
+     <button type="button" class="publisher-tool-tab" data-tool-tab="insights" role="tab" aria-selected="false">Growth Insights</button>
      <button type="button" class="publisher-tool-tab" data-tool-tab="export" role="tab" aria-selected="false">Metadata export</button>
      <button type="button" class="publisher-tool-tab" data-tool-tab="notifications" role="tab" aria-selected="false">Notifications <span id="publisher-notification-count">0</span></button>
     </div>
@@ -48,6 +49,12 @@
      <div class="publisher-calendar-toolbar"><div><span class="publisher-kicker">CHANNEL PERFORMANCE</span><h4>Top published Shorts</h4><p>Ranked by the latest available lifetime view-count snapshots.</p></div><span id="publisher-ranking-updated" class="publisher-tool-muted">Not synced yet</span></div>
      <div id="publisher-ranking-list" class="publisher-ranking-list"><div class="publisher-empty">Load YouTube metrics to see the ranking.</div></div>
      <small class="publisher-tool-note">Views, likes and comments are Data API lifetime totals for the published videos returned by the existing analytics endpoint. Average viewed is shown only when YouTube Analytics has a value for that video.</small>
+    </div>
+    <div class="publisher-tool-panel hidden" data-tool-panel="insights">
+     <div class="publisher-calendar-toolbar"><div><span class="publisher-kicker">GROWTH INTELLIGENCE</span><h4>Insights from your channel</h4><p>Read-only analysis of your existing YouTube snapshots and publishing history. No forecasts or industry benchmarks.</p></div><span id="publisher-insights-updated" class="publisher-tool-muted">Waiting for metrics</span></div>
+     <div id="publisher-insights-summary" class="publisher-insights-summary"></div>
+     <div id="publisher-insights-cards" class="publisher-insights-cards"><div class="publisher-empty">Sync views to build your first set of channel insights.</div></div>
+     <small class="publisher-tool-note">View totals are lifetime counts for Shorts published in the last 90 days. Changes since the previous sync compare the latest two snapshots; YouTube may revise counts. Retention is best compared between Shorts of similar length and format.</small>
     </div>
     <div class="publisher-tool-panel hidden" data-tool-panel="export">
      <div class="publisher-export-card"><div><span class="publisher-kicker">CONTENT LIBRARY · CSV</span><h4>Export publish-ready metadata</h4><p>Download titles, descriptions, tags, hashtags, hooks and source information from your existing Content Library. No videos are downloaded or uploaded.</p></div><label class="publisher-export-option"><input type="checkbox" id="publisher-export-include-old"> Include previous metadata versions</label><button type="button" class="primary-button" id="publisher-export-csv">Export metadata CSV <span>↓</span></button><small id="publisher-export-status" class="publisher-tool-note">Default export includes current, publish-ready versions only.</small></div>
@@ -140,7 +147,7 @@
    if(!response.ok||!data.ok)throw new Error(data.error||"Retention metrics unavailable.");
    state.retention=data;
    $("#publisher-retention-average").textContent=Number(data.averageViewPercentage||0).toFixed(1)+"%";
-   renderPerformanceRanking();
+   renderPerformanceRanking();if(state.activeTool==="insights")renderGrowthInsights();
    $("#publisher-retention-count").textContent=metricNumber(data.measuredCount);
    const measured=(data.videos||[]).filter(v=>v.average_view_duration!==null&&v.average_view_duration!==undefined);
    const average=measured.length?measured.reduce((sum,v)=>sum+Number(v.average_view_duration||0),0)/measured.length:0;
@@ -167,7 +174,7 @@
    const top=(data.videos||[]).filter(v=>v.views!==null&&v.views!==undefined).sort((a,b)=>Number(b.views)-Number(a.views)).slice(0,5);
    views.innerHTML=top.length?top.map((v,i)=>'<article class="publisher-metric-video"><span class="publisher-metric-rank">'+(i+1)+'</span><div><b>'+esc(v.title||v.clip_title||"YouTube Short")+'</b><small>'+esc(v.source_title||"")+'</small></div><strong>'+metricNumber(v.views)+' views</strong>'+(v.platform_url?'<a href="'+esc(v.platform_url)+'" target="_blank" rel="noopener">Watch ↗</a>':"")+'</article>').join(""):'<div class="publisher-empty">No published video metrics yet. Publish a Short, then sync again.</div>';
    const note=$(".publisher-metric-note");if(note)note.textContent=data.note||"Metrics are provided by YouTube Data API.";
-   renderPerformanceRanking();
+   renderPerformanceRanking();if(state.activeTool==="insights")renderGrowthInsights();
   }catch(error){views.innerHTML='<div class="publisher-empty">'+esc(error.message)+"</div>";}
  }
  async function syncMetrics(){
@@ -231,6 +238,7 @@
   });
   root.querySelectorAll("[data-tool-panel]").forEach(panel=>panel.classList.toggle("hidden",panel.dataset.toolPanel!==state.activeTool));
   renderCalendar();renderQualityChecklist();renderPerformanceRanking();renderNotifications();
+  if(state.activeTool==="insights")renderGrowthInsights();
  }
  function renderCalendar(){
   const grid=$("#publisher-calendar-grid");if(!grid)return;
@@ -289,6 +297,46 @@
    const url=typeof video.platform_url==="string"&&/^https:\/\/(www\.)?youtube\.com\//i.test(video.platform_url)?video.platform_url:"";
    return '<article class="publisher-ranking-row"><span class="publisher-metric-rank">'+(index+1)+'</span><div class="publisher-ranking-main"><b>'+esc(video.title||video.clip_title||"YouTube Short")+'</b><small>'+esc(video.source_title||"")+'</small></div><strong>'+metricNumber(video.views)+' <small>views</small></strong><span class="publisher-ranking-secondary">'+metricNumber(video.likes)+' likes · '+metricNumber(video.comments)+' comments</span><span class="publisher-ranking-secondary">'+(percentage===null||percentage===undefined?"—":Number(percentage).toFixed(1)+"% viewed")+'</span>'+(url?'<a href="'+esc(url)+'" target="_blank" rel="noopener">Watch ↗</a>':"")+'</article>';
   }).join(""):'<div class="publisher-empty">No published video snapshots yet. Use “Sync views” in the growth tracker above.</div>';
+ }
+
+ function renderGrowthInsights(){
+  const summary=$("#publisher-insights-summary"),cards=$("#publisher-insights-cards"),updated=$("#publisher-insights-updated");
+  if(!summary||!cards)return;
+  const now=Date.now(),metrics=state.metrics||{},allVideos=Array.isArray(metrics.videos)?metrics.videos:[];
+  const recent=allVideos.filter(video=>{
+   const published=Date.parse(video.published_at||"");
+   return Number.isFinite(published)&&published<=now&&now-published<=90*86400000&&video.views!==null&&video.views!==undefined;
+  });
+  const deltaRows=recent.filter(video=>video.previous_views!==null&&video.previous_views!==undefined&&Number.isFinite(Number(video.views))&&Number.isFinite(Number(video.previous_views))).map(video=>({
+   video,views:Number(video.views)-Number(video.previous_views),
+   likes:video.previous_likes===null||video.previous_likes===undefined?null:Number(video.likes||0)-Number(video.previous_likes),
+   comments:video.previous_comments===null||video.previous_comments===undefined?null:Number(video.comments||0)-Number(video.previous_comments)
+  }));
+  const netViews=deltaRows.reduce((sum,row)=>sum+row.views,0),netLikes=deltaRows.reduce((sum,row)=>sum+(row.likes??0),0),netComments=deltaRows.reduce((sum,row)=>sum+(row.comments??0),0);
+  const bestReach=recent.slice().sort((x,y)=>Number(y.views)-Number(x.views))[0]||null;
+  const measured=(state.retention?.videos||[]).filter(v=>v.average_view_percentage!==null&&v.average_view_percentage!==undefined&&Number.isFinite(Number(v.average_view_percentage)));
+  const bestRetention=measured.slice().sort((x,y)=>Number(y.average_view_percentage)-Number(x.average_view_percentage))[0]||null;
+  const published=(state.jobs||[]).filter(j=>String(j.status||"").toLowerCase()==="published").map(job=>({job,time:Date.parse(job.updated_at||job.created_at||"")})).filter(x=>Number.isFinite(x.time)&&x.time<=now);
+  const current30=published.filter(x=>now-x.time<=30*86400000),previous30=published.filter(x=>now-x.time>30*86400000&&now-x.time<=60*86400000);
+  const signed=value=>(value>0?"+":"")+metricNumber(value);
+  const tiles=[
+   {label:"90-day publishing cohort",value:metrics.totals?metricNumber(metrics.totals.views):"—",detail:"Lifetime views on Shorts published in the last 90 days"},
+   {label:"Views since last sync",value:deltaRows.length?signed(netViews)+" views":"Need another sync",detail:deltaRows.length?deltaRows.length+" Shorts have two snapshots":"Sync views again later to compare"},
+   {label:"Best average viewed",value:bestRetention?Number(bestRetention.average_view_percentage).toFixed(1)+"%":"—",detail:bestRetention?(bestRetention.title||bestRetention.clip_title||"Best measured Short"):"No retention data yet"},
+   {label:"Published in last 30 days",value:String(current30.length),detail:previous30.length+" in the previous 30 days"}
+  ];
+  summary.innerHTML=tiles.map(t=>'<article class="publisher-insight-stat"><span>'+esc(t.label)+'</span><strong>'+esc(t.value)+'</strong><small>'+esc(t.detail)+'</small></article>').join("");
+  const syncParts=[];if(metrics.lastSyncedAt)syncParts.push("Views synced "+date(metrics.lastSyncedAt));if(state.retention?.lastSyncedAt)syncParts.push("Retention synced "+date(state.retention.lastSyncedAt));
+  if(updated)updated.textContent=syncParts.length?syncParts.join(" · "):"No metrics synced yet";
+  const entries=[];
+  if(bestReach){const title=bestReach.title||bestReach.clip_title||"Untitled Short",source=bestReach.source_title?" Source: "+bestReach.source_title+".":"";entries.push({kind:"Reach leader",body:title+" has "+metricNumber(bestReach.views)+" lifetime views."+source,detail:"Use it as a comparison point for your next experiment; this does not guarantee the same result."});}
+  if(bestRetention){const title=bestRetention.title||bestRetention.clip_title||"Untitled Short",pct=Number(bestRetention.average_view_percentage).toFixed(1)+"%",duration=bestRetention.average_view_duration!==null&&bestRetention.average_view_duration!==undefined?" Average view duration: "+durationLabel(bestRetention.average_view_duration)+".":"";entries.push({kind:"Retention leader",body:title+" currently has the highest measured average viewed at "+pct+"."+duration,detail:"Compare against Shorts with similar length and format before reusing its structure."});}
+  if(deltaRows.length){const leader=deltaRows.slice().sort((x,y)=>y.views-x.views)[0],net=netViews>=0?"+"+metricNumber(netViews):metricNumber(netViews),leaderTitle=leader?.video?.title||leader?.video?.clip_title||"a tracked Short";entries.push({kind:"Snapshot momentum",body:"Net view-count change since the previous manual sync: "+net+".",detail:"The largest individual change was "+signed(leader.views)+" views for "+leaderTitle+". Likes changed "+signed(netLikes)+" and comments changed "+signed(netComments)+". YouTube can revise lifetime counts."});}
+  else entries.push({kind:"Build your baseline",body:"There are not yet two view snapshots for the same published Shorts.",detail:"Use Sync views again after your next measurement interval. Growth Insights does not add background polling."});
+  if(published.length){const diff=current30.length-previous30.length,comparison=diff>0?"up by "+diff:diff<0?"down by "+Math.abs(diff):"unchanged";entries.push({kind:"Publishing rhythm",body:"You published "+current30.length+" Shorts in the last 30 days, "+comparison+" versus the previous 30 days.",detail:"Use your own publishing history to plan the next schedule; no fixed posting target is assumed."});}
+  else entries.push({kind:"Publishing rhythm",body:"No published Shorts are recorded in the current Publisher history.",detail:"Once a Short is published and appears in the queue history, this panel can compare your cadence."});
+  if(!recent.length&&!measured.length&&!published.length){cards.innerHTML='<div class="publisher-empty">Connect YouTube and sync channel metrics to unlock Growth Insights. This panel uses existing snapshots and does not upload, publish or alter videos.</div>';return;}
+  cards.innerHTML=entries.map((entry,index)=>'<article class="publisher-insight-card"><span class="publisher-insight-mark">'+String(index+1)+'</span><div><b>'+esc(entry.kind)+'</b><p>'+esc(entry.body)+'</p><small>'+esc(entry.detail)+'</small></div></article>').join("");
  }
  function renderNotifications(){
   const list=$("#publisher-notifications-list");if(!list)return;
