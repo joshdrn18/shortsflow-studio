@@ -4,7 +4,7 @@ import json
 import shlex
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = "20261115-publisher-suite1"
+BUILD = "20261117-publisher-light1"
 
 class Assets(HTMLParser):
     def __init__(self):
@@ -69,6 +69,20 @@ if f'BUILD = "{BUILD}"' not in smoke_test:
     raise SystemExit("Production smoke-test build marker is out of sync with the frontend.");
 
 publisher_js = (ROOT / "assets/publisher.js").read_text(encoding="utf-8")
+refresh_start = publisher_js.find("async function refreshQueueStatus(){")
+refresh_end = publisher_js.find("async function load(){", refresh_start)
+if refresh_start < 0 or refresh_end < 0:
+    raise SystemExit("Publisher lightweight queue refresh function is missing.")
+refresh_block = publisher_js[refresh_start:refresh_end]
+if 'fetch("/api/youtube"' not in refresh_block:
+    raise SystemExit("Publisher background refresh must use the lightweight queue endpoint.")
+for endpoint in ("/api/review", "/api/workspace/brand-kit", "/api/youtube/analytics", "/api/youtube/retention"):
+    if endpoint in refresh_block:
+        raise SystemExit(f"Publisher background refresh must not reload {endpoint}.")
+if "setInterval(refreshQueueStatus,60000)" not in publisher_js:
+    raise SystemExit("Publisher queue refresh must use the 60-second cadence.")
+if 'document.visibilityState==="hidden"' not in refresh_block:
+    raise SystemExit("Publisher queue refresh must pause while the browser tab is hidden.")
 for marker in ("publisher-calendar-grid", "publisher-checklist-items", "publisher-ranking-list", "publisher-insights-summary", "publisher-insights-cards", "renderGrowthInsights", "publisher-export-csv", "publisher-notifications-list"):
     if marker not in publisher_js:
         raise SystemExit(f"Publisher workspace tool is missing: {marker}")
@@ -82,6 +96,7 @@ if "decision===\"approved\"" not in publisher_js or "Review Center" not in publi
     raise SystemExit("Publisher approval selection or explanatory review gate is missing.")
 if "admin-control.js" not in html or "admin-control.css" not in html or "admin-actions.js" not in html or "admin-actions.css" not in html:
     raise SystemExit("Admin control center assets are not linked.")
+print("OK: Publisher background refresh only checks queue status every 60 seconds and pauses in hidden tabs.")
 print("OK: global admin access is separate from workspace owner permissions.")
 if 'admin.systemRole !== "admin"' not in admin_actions_api:
     raise SystemExit("Admin actions endpoint must require the global administrator role.")
