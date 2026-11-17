@@ -1,6 +1,6 @@
 (() => {
  const $=s=>document.querySelector(s),esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- let state={connection:null,jobs:[],eligible:[],loading:false,profiles:[],activeProfileId:null,metrics:null,retention:null,activeTool:"calendar"};
+ let state={connection:null,jobs:[],eligible:[],eligibleCount:null,loading:false,statusLoading:false,profiles:[],activeProfileId:null,metrics:null,retention:null,activeTool:"calendar"};
  let calendarCursor=new Date();
  let selectedCalendarDay=localDayKey(new Date());
  const date=v=>{if(!v)return"Ready for automatic upload";const d=new Date(v);return Number.isNaN(d.getTime())?"—":d.toLocaleString([], {dateStyle:"medium",timeStyle:"short"});};
@@ -202,26 +202,33 @@
   else tags.forEach(tag=>{const chip=document.createElement("span");chip.textContent="#"+tag.replace(/^#+/,"");tagBox.append(chip);});
  }
  function setMessage(msg,error=false){const el=$("#publisher-message");el.textContent=msg;el.classList.toggle("error",error);}
- function render(){
+ function renderConnectionStats(){
   const c=state.connection;
   $("#youtube-channel-title").textContent=c?.connected?c.channelTitle:"YouTube channel not connected";
   $("#youtube-channel-detail").textContent=c?.connected?"Connected · "+date(c.connectedAt):"Connect your Google account to prepare YouTube uploads.";
   $("#youtube-connect").textContent=c?.connected?"Reconnect YouTube ↗":"Connect YouTube ↗";
   $("#youtube-connect").classList.toggle("connected",!!c?.connected);
-  $("#publisher-eligible").textContent=state.eligible.length;
+  $("#publisher-eligible").textContent=state.eligibleCount===null?state.eligible.length:state.eligibleCount;
   $("#publisher-queued").textContent=state.jobs.filter(j=>["queued","uploading","processing"].includes(j.status)).length;
   $("#publisher-published").textContent=state.jobs.filter(j=>j.status==="published").length;
-  const select=$("#publisher-clip"),current=select.value;
-  select.innerHTML='<option value="">Choose an approved render…</option>'+state.eligible.map(x=>'<option value="'+esc(x.clipId)+'">'+esc(x.title)+' · '+Math.round(x.durationSeconds)+' sec</option>').join("");
-  if(state.eligible.some(x=>x.clipId===current))select.value=current;
   $("#publisher-submit").disabled=!c?.connected||!state.eligible.length;
+ }
+ function renderJobs(){
   const list=$("#publisher-jobs");
+  if(!list)return;
   if(!state.jobs.length){list.innerHTML='<div class="publisher-empty">No publishing jobs yet. Approved clips will appear in the planner above.</div>';}
   else{
    list.innerHTML=state.jobs.map(j=>{const status=String(j.status||"").trim().toLowerCase();return '<article class="publisher-job"><div class="publisher-job-main"><b>'+esc(j.title||j.clip_title||"YouTube Short")+'</b><span>'+esc(date(j.scheduled_at))+'</span>'+(status==="failed"&&j.last_error?'<small class="publisher-error-detail">'+esc(j.last_error)+'</small>':"")+'</div><span class="publisher-status status-'+esc(status)+'">'+esc(status||"unknown")+'</span>'+(j.platform_url?'<a href="'+esc(j.platform_url)+'" target="_blank" rel="noopener">Watch ↗</a>':"")+(status==="queued"?'<button class="text-button" data-cancel="'+esc(j.id)+'">Cancel</button>':"")+(status==="failed"?'<button class="publisher-delete-button" data-delete="'+esc(j.id)+'" aria-label="Delete failed publishing job">Delete failed job</button>':"")+'</article>'}).join("");
    list.querySelectorAll("[data-cancel]").forEach(btn=>btn.addEventListener("click",()=>cancel(btn.dataset.cancel)));
    list.querySelectorAll("[data-delete]").forEach(btn=>btn.addEventListener("click",()=>removeFailed(btn.dataset.delete)));
   }
+ }
+ function render(){
+  renderConnectionStats();
+  const select=$("#publisher-clip"),current=select.value;
+  select.innerHTML='<option value="">Choose an approved render…</option>'+state.eligible.map(x=>'<option value="'+esc(x.clipId)+'">'+esc(x.title)+' · '+Math.round(x.durationSeconds)+' sec</option>').join("");
+  if(state.eligible.some(x=>x.clipId===current))select.value=current;
+  renderJobs();
   renderPublisherTools();
  }
 
@@ -380,6 +387,29 @@
   finally{button.disabled=false;button.innerHTML='Export metadata CSV <span>↓</span>';}
  }
 
+ async function refreshQueueStatus(){
+  const panel=$("#publisher-workspace");
+  if(!panel||panel.classList.contains("hidden")||document.visibilityState==="hidden"||state.loading||state.statusLoading)return;
+  state.statusLoading=true;
+  try{
+   const response=await fetch("/api/youtube",{headers:{accept:"application/json"}});
+   const data=await response.json();
+   if(!response.ok||!data.ok)throw new Error(data.error||"Could not refresh publishing status.");
+   state.connection=data.connection;
+   state.jobs=data.jobs||[];
+   state.eligibleCount=Number(data.eligibleCount||0);
+   renderConnectionStats();
+   renderJobs();
+   if(state.activeTool==="calendar")renderCalendar();
+   renderNotifications();
+   if(state.activeTool==="insights")renderGrowthInsights();
+  }catch(error){
+   // Keep the last known queue state; manual refresh surfaces actionable errors.
+  }finally{
+   state.statusLoading=false;
+  }
+ }
+
  async function load(){
   ensure();if(state.loading)return;state.loading=true;
   try{
@@ -389,7 +419,7 @@
    let b={profiles:[],activeProfileId:null};
    try{const brands=await fetch("/api/workspace/brand-kit",{headers:{accept:"application/json"}});const data=await brands.json();if(brands.ok&&data.ok)b=data;else setMessage(data.error||"Brand Profiles unavailable. Apply migration 0017 to enable saved metadata templates.",true);}
    catch{setMessage("Brand Profiles unavailable. Publisher queue remains usable; apply migration 0017 to enable saved metadata templates.",true);}
-   state.connection=p.connection;state.jobs=p.jobs||[];state.eligible=(r.items||[]).filter(x=>x.decision==="approved");state.profiles=b.profiles||[];state.activeProfileId=b.activeProfileId||null;
+   state.connection=p.connection;state.jobs=p.jobs||[];state.eligibleCount=Number(p.eligibleCount||0);state.eligible=(r.items||[]).filter(x=>x.decision==="approved");state.profiles=b.profiles||[];state.activeProfileId=b.activeProfileId||null;
    render();renderBrandProfileOptions();loadBrandTemplateFields();
    loadMetrics();loadRetention();
   }catch(e){setMessage(e.message,true);}
@@ -431,6 +461,7 @@
  }
  document.addEventListener("shortsflow:view",e=>{if(e.detail?.view==="publisher"){ensure();$("#publisher-workspace").classList.remove("hidden");load();}else $("#publisher-workspace")?.classList.add("hidden");});
  ensure();
- setInterval(()=>{const panel=$("#publisher-workspace");if(panel&&!panel.classList.contains("hidden"))load();},15000);
+ setInterval(refreshQueueStatus,60000);
+ document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")refreshQueueStatus();});
  const params=new URLSearchParams(location.search);if(params.has("youtube")){const result=params.get("youtube"),reason=params.get("reason");history.replaceState({}, "", location.pathname);if(result==="connected")setTimeout(()=>{ensure();load();setMessage("YouTube channel connected successfully.");},0);else if(result!=="")setTimeout(()=>{ensure();const messages={denied:"Google connection was cancelled.",setup:"OAuth configuration is incomplete. Check the YouTube environment variables in Cloudflare Pages.", "invalid-state":"The Google sign-in session expired or did not match. Start Connect YouTube again.",token:"Google rejected the authorization-code exchange. Check the OAuth client ID, client secret, and exact redirect URI.", "channel-api":"Google sign-in succeeded, but YouTube Data API could not read the channel. Confirm YouTube Data API v3 is enabled in the same Google Cloud project.", "no-channel":"This Google account does not have an accessible YouTube channel. Create or select a YouTube channel, then reconnect.", "no-refresh-token":"Google did not provide a refresh token. Remove ShortsFlow access from your Google Account permissions, then connect again.", "encryption-key":"The token encryption key is invalid. Set YOUTUBE_TOKEN_ENCRYPTION_KEY to Base64 for exactly 32 random bytes in Pages.",database:"Google authorized the channel, but ShortsFlow could not save the connection in its database. Check the Pages D1 binding and migration 0012.",callback:"The OAuth callback failed unexpectedly. Check the Pages Function logs for youtube_oauth_callback."};setMessage(messages[reason]||"YouTube connection failed ("+(reason||"unknown")+"). Try connecting again.",true);},0);}
 })();
