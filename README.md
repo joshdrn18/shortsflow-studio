@@ -88,3 +88,7 @@ After binding D1 and applying migrations, deploy the Pages project and verify:
 ## Analysis engine
 
 The scheduled Worker `shortsflow-analysis-engine` runs every minute and uses the private R2 source binding, Cloudflare Media Transformations binding, and Workers AI Whisper. Media Transformations is currently in open beta; binding-based operations are not billed during the beta. Workers AI has a 10,000-Neuron daily free allocation; ShortsFlow reserves at most 8,000 estimated Whisper Neurons per UTC day for this app. The cap is an app-level safeguard, not a guarantee against usage from other Workers AI services on the same account. Sources must be MP4 with H.264 video and AAC/MP3 audio, under 100 MB and no longer than 10 minutes. Each cron invocation transcribes one 60-second chunk and persists progress in D1.
+
+## Preview environment
+
+The Cloudflare Pages preview environment uses a dedicated D1 database (`shortsflow-studio-preview`) and R2 bucket (`shortsflow-studio-preview-media`). It must not be rebound to the production database or media bucket. Preview YouTube OAuth and scheduled publishing are intentionally not configured; only the production Worker processes explicitly queued YouTube uploads after the Review Center approval checks.

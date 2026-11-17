@@ -39,12 +39,31 @@ export async function onRequestPost({request,env}){
    WHERE c.id=? AND c.workspace_id=? AND a.metadata_version=m.version LIMIT 1`).bind(clipId,user.workspace.id).first();
   if(!clip)return json({ok:false,error:"This clip has no approval for its latest render. Review and approve the current version first."},409);
   const duplicate=await env.DB.prepare("SELECT id FROM publishing_jobs WHERE clip_id=? AND render_asset_id=? AND status IN ('queued','uploading','processing','published') LIMIT 1").bind(clipId,clip.asset_id).first();
-  if(duplicate)return json({ok:false,error:"This exact render already has a publishing job."},409);
+  if(duplicate)return json({ok:false,code:"EXACT_DUPLICATE",error:"This exact render already has a publishing job."},409);
+  const overlap=await env.DB.prepare(`
+   SELECT candidate.id AS clip_id,COALESCE(meta.title,candidate.title,'Untitled clip') AS title,
+    candidate.start_seconds,candidate.end_seconds,job.status,job.platform_url,
+    MIN(candidate.end_seconds,source_clip.end_seconds)-MAX(candidate.start_seconds,source_clip.start_seconds) AS overlap_seconds
+   FROM clips source_clip
+   JOIN clips candidate ON candidate.source_video_id=source_clip.source_video_id
+    AND candidate.workspace_id=source_clip.workspace_id
+   JOIN publishing_jobs job ON job.clip_id=candidate.id AND job.platform='youtube'
+    AND job.status IN ('queued','uploading','processing','published')
+    AND job.render_asset_id<>?
+   LEFT JOIN clip_metadata meta ON meta.clip_id=candidate.id
+    AND meta.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=candidate.id)
+   WHERE source_clip.id=? AND source_clip.workspace_id=?
+    AND MIN(candidate.end_seconds,source_clip.end_seconds)-MAX(candidate.start_seconds,source_clip.start_seconds)>0
+    AND MIN(candidate.end_seconds,source_clip.end_seconds)-MAX(candidate.start_seconds,source_clip.start_seconds)
+      >=0.9*MIN(candidate.end_seconds-candidate.start_seconds,source_clip.end_seconds-source_clip.start_seconds)
+   ORDER BY job.created_at DESC LIMIT 1
+  `).bind(clipId,user.workspace.id,clip.asset_id).first();
+  if(overlap&&body?.allowDuplicateOverlap!==true)return json({ok:false,code:"CLIP_OVERLAP",error:"This clip strongly overlaps a segment that is already queued or published.",conflict:{clipId:overlap.clip_id,title:overlap.title,status:overlap.status,startSeconds:Number(overlap.start_seconds),endSeconds:Number(overlap.end_seconds),overlapSeconds:Number(overlap.overlap_seconds),platformUrl:overlap.platform_url||null}},409);
   const id=crypto.randomUUID(),now=new Date().toISOString(),when=scheduledAt?scheduledAt.toISOString():now;
   await env.DB.prepare(`INSERT INTO publishing_jobs (id,clip_id,review_id,platform,status,scheduled_at,created_at,updated_at,render_asset_id,metadata_version,title,description,privacy_status,tags_json)
    VALUES (?,?,?,'youtube','queued',?,?,?,?,?,?,?,?,?)`).bind(id,clipId,clip.review_id,when,now,now,clip.asset_id,clip.metadata_version,title,description,privacy,JSON.stringify(tags)).run();
   await env.DB.prepare("UPDATE clips SET status='publishing',updated_at=? WHERE id=? AND workspace_id=?").bind(now,clipId,user.workspace.id).run();
-  await env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(),user.workspace.id,"clip",clipId,"youtube_publish_queued",JSON.stringify({jobId:id,assetId:clip.asset_id,scheduledAt:when,privacyStatus:privacy}),now).run();
+  await env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(),user.workspace.id,"clip",clipId,"youtube_publish_queued",JSON.stringify({jobId:id,assetId:clip.asset_id,scheduledAt:when,privacyStatus:privacy,duplicateOverlapOverride:Boolean(overlap&&body?.allowDuplicateOverlap===true),overlapClipId:overlap?.clip_id||null}),now).run();
   return json({ok:true,job:{id,clipId,renderAssetId:clip.asset_id,status:"queued",scheduledAt:when,privacyStatus:privacy}},201);
  }catch(e){console.error("youtube_publish_queue",e);return json({ok:false,error:"Could not schedule this YouTube upload."},503);}
 }

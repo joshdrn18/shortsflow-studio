@@ -26,15 +26,22 @@ require(
     "Autopilot must reject scripts that do not cite a supplied, valid source.",
 )
 
-# The scheduled Worker may create content packages, but must not invoke the
-# YouTube publisher. Finished output is stored as ready_to_publish.
+# Autopilot only creates a content package. It must never enqueue a YouTube
+# publishing job by itself. The separate Publisher processor may handle only
+# jobs that a user explicitly queued through the approval-protected Publisher.
 require(
-    "ctx.waitUntil(Promise.all([processNextJob(env), processAutopilot(env)]));" in WORKER,
-    "Worker scheduled handler no longer runs the content pipeline.",
+    "status='ready_to_publish'" in WORKER and "publishing_job_id=NULL" in WORKER,
+    "Autopilot render completion must create a ready-to-publish content package.",
 )
 require(
-    WORKER.count("processYoutubeJob(env)") == 1,
-    "Scheduled Worker unexpectedly invokes the YouTube publishing pipeline.",
+    "ctx.waitUntil(Promise.all([processNextJob(env), processAutopilot(env), processYoutubeJob(env)]));" in WORKER,
+    "Worker scheduled handler must retain content processing and the manual Publisher queue processor.",
+)
+require(
+    WORKER.count("processYoutubeJob(env)") == 2
+    and "p.platform='youtube' AND p.status='queued'" in WORKER
+    and "AND r.id=?" in WORKER,
+    "Publisher processor must handle only explicitly queued uploads and recheck the exact approval.",
 )
 require(
     "status='ready_to_publish'" in WORKER and "publishing_job_id=NULL" in WORKER,
