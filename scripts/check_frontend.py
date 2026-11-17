@@ -4,7 +4,7 @@ import json
 import shlex
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = "20261117-pipeline-light1"
+BUILD = "20261117-server-transcribe1"
 
 class Assets(HTMLParser):
     def __init__(self):
@@ -117,6 +117,27 @@ if 'const sourceFilter = sourceId ? "AND c.source_video_id = ?" : "";' not in cl
     raise SystemExit("Clip API source-specific discovery filter is missing or unvalidated.")
 if 'let sourceBuffer=await response.arrayBuffer();' not in sources_js or 'finally {\n      try{ffmpeg.terminate();}catch{}' not in sources_js:
     raise SystemExit("Browser FFmpeg must use a single response buffer and always terminate the worker.")
+server_jobs_api = (ROOT / "functions/api/jobs/index.js").read_text(encoding="utf-8")
+if 'searchParams.get("sourceId")' not in server_jobs_api or 'AND j.source_video_id = ?' not in server_jobs_api:
+    raise SystemExit("Processing jobs API must support a validated source-specific status query.")
+if "progressChunks" not in server_jobs_api or "totalChunks" not in server_jobs_api:
+    raise SystemExit("Server transcription progress must expose safe chunk counters.")
+server_transcribe = sources_js.find("async function transcribeSourceOnServer(")
+browser_transcribe = sources_js.find("async function transcribeSourceInBrowser(")
+queue_source = sources_js.find("async function queueSource(")
+if min(server_transcribe, browser_transcribe, queue_source) < 0 or not server_transcribe < queue_source:
+    raise SystemExit("Low-memory server transcription path is missing from Source Library.")
+server_queue_block = sources_js[server_transcribe:queue_source]
+if 'fetch("/api/jobs"' not in server_queue_block or 'fetch("/api/jobs?sourceId="+encodeURIComponent(sourceId)' not in server_queue_block:
+    raise SystemExit("Eligible MP4 sources must queue and monitor server-side transcription.")
+if "size<100*1024*1024" not in sources_js or "transcribeSourceInBrowser(sourceId,duration,updateProgress)" not in sources_js:
+    raise SystemExit("The 100 MB server path and large-file browser fallback must both be preserved.")
+if "Large MP4 detected" not in sources_js or 'source.mimeType!=="video/mp4"' not in sources_js:
+    raise SystemExit("Large-file fallback and MP4-only analysis guidance are missing.")
+if "browserFallback=job.status===\"failed\"" not in sources_js or "switching to browser fallback" not in sources_js:
+    raise SystemExit("Unsupported Media Transform codec fallback is missing.")
+print("OK: Smaller MP4s use Cloudflare server transcription; large MP4s and unsupported codecs retain browser fallback.")
+print("OK: Server transcription progress is source-scoped and payload data stays private.")
 print("OK: Sources, Clip Discovery, rendering queue and render-status polling are throttled and visibility-aware.")
 print("OK: Autopilot discovery is source-filtered and browser FFmpeg always terminates.")
 print("OK: Publisher background refresh only checks queue status every 60 seconds and pauses in hidden tabs.")
