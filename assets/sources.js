@@ -171,6 +171,54 @@
       try{ffmpeg.terminate();}catch{}
     }
   }
+  function waitForServerPoll(ms) {
+    return new Promise(resolve=>{
+      let timer;
+      let finished=false;
+      const finish=()=>{if(finished)return;finished=true;clearTimeout(timer);document.removeEventListener("visibilitychange",onVisibility);resolve();};
+      const onVisibility=()=>{if(document.visibilityState==="visible")finish();};
+      timer=setTimeout(finish,document.visibilityState==="hidden"?Math.max(ms,60000):ms);
+      document.addEventListener("visibilitychange",onVisibility);
+    });
+  }
+  async function transcribeSourceOnServer(sourceId,durationSeconds,progress) {
+    progress("Queueing low-memory server transcription…",3);
+    const queuedResponse=await fetch("/api/jobs",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",accept:"application/json"},
+      body:JSON.stringify({jobType:"analyze_source",sourceId})
+    });
+    const queued=await queuedResponse.json().catch(()=>({}));
+    if(!queuedResponse.ok||!queued.ok||!queued.job?.id)throw new Error(queued.error||"Could not queue server transcription.");
+    const jobId=String(queued.job.id);
+    const totalChunks=Math.max(1,Math.ceil(durationSeconds/60));
+    const deadline=Date.now()+45*60*1000;
+    let lastProgress=-1;
+    while(Date.now()<deadline) {
+      const response=await fetch("/api/jobs?sourceId="+encodeURIComponent(sourceId),{
+        headers:{accept:"application/json"},cache:"no-store"
+      });
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok||!data.ok)throw new Error(data.error||"Could not check server transcription status.");
+      const job=(data.jobs||[]).find(item=>String(item.id)===jobId);
+      if(job?.status==="succeeded") {
+        progress("Server transcription complete. Clip discovery is queued…",90);
+        return job;
+      }
+      if(job?.status==="failed"||job?.status==="cancelled") {
+        throw new Error(job.last_error||"Server transcription failed. Retry analysis from Source Library.");
+      }
+      const chunks=Math.min(totalChunks,Number(job?.progressChunks||0));
+      const percent=8+Math.round(chunks/totalChunks*78);
+      if(percent!==lastProgress) {
+        const state=job?.status==="running"?"Processing on Cloudflare":"Waiting for the Cloudflare analysis queue";
+        progress(state+" · audio segment "+Math.min(totalChunks,Math.max(1,chunks+1))+" of "+totalChunks+"…",percent);
+        lastProgress=percent;
+      }
+      await waitForServerPoll(30000);
+    }
+    throw new Error("Server transcription is still queued. Your source is safe; refresh the processing queue to check its progress.");
+  }
   async function queueSource(sourceId,button) {
     if(button){button.disabled=true;button.textContent="Preparing…";}
     const box=$("#upload-progress"),bar=$("#upload-progress-bar"),pct=$("#upload-percent"),status=$("#upload-status");
@@ -180,9 +228,16 @@
       const sourceData=await sourceResponse.json();
       const source=(sourceData.sources||[]).find(item=>item.id===sourceId);
       if(!source)throw new Error("Source video not found. Refresh the source list.");
-      const duration=Number(source.durationSeconds||0);
-      if(!Number.isFinite(duration)||duration<=0||duration>1800)throw new Error("Browser transcription supports MP4 videos up to 30 minutes.");
-      await transcribeSourceInBrowser(sourceId,duration,(message,value)=>{status.textContent=message;bar.style.width=value+"%";pct.textContent=value+"%";});
+      const duration=Number(source.durationSeconds||0),size=Number(source.sizeBytes||0);
+      if(!Number.isFinite(duration)||duration<=0||duration>1800)throw new Error("AI analysis supports videos up to 30 minutes. Re-upload the source if its duration is unavailable.");
+      if(source.mimeType!=="video/mp4")throw new Error("AI analysis currently requires an MP4 source. Re-export this video as MP4, then retry.");
+      const updateProgress=(message,value)=>{status.textContent=message;bar.style.width=value+"%";pct.textContent=value+"%";};
+      if(Number.isFinite(size)&&size>0&&size<100*1024*1024) {
+        await transcribeSourceOnServer(sourceId,duration,updateProgress);
+      } else {
+        updateProgress("Large MP4 detected · using browser fallback (this can use more RAM)…",2);
+        await transcribeSourceInBrowser(sourceId,duration,updateProgress);
+      }
       if(button)button.textContent="Transcribed";await load();await loadJobs();
     } catch(error) {
       status.textContent=error.message||"Transcription failed. Retry analysis.";
