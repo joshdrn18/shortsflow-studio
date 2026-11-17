@@ -183,7 +183,13 @@
   busy=true;btn.disabled=true;btn.textContent="Queueing…";
   let metadataVersion=Number(clip.metadataVersion||0),requeues=0;
   const statusUrl="/api/clips/"+encodeURIComponent(clip.id)+"/render-jobs";
-  const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const wait=ms=>new Promise(resolve=>{
+   let timer;
+   const finish=()=>{clearTimeout(timer);document.removeEventListener("visibilitychange",onVisibility);resolve();};
+   const onVisibility=()=>{if(document.visibilityState==="visible")finish();};
+   timer=setTimeout(finish,ms);
+   document.addEventListener("visibilitychange",onVisibility);
+  });
   const refreshVersion=async()=>{
    const response=await fetch("/api/clips",{headers:{accept:"application/json"},cache:"no-store"});
    const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not refresh the saved clip version.");
@@ -215,7 +221,7 @@
    msg.textContent="Background render queued. You can switch tabs or close this browser; processing continues on the server.";
    const deadline=Date.now()+45*60*1000;
    while(Date.now()<deadline){
-    await wait(5000);
+    await wait(document.visibilityState==="hidden"?60000:10000);
     response=await fetch(statusUrl,{headers:{accept:"application/json"},cache:"no-store"});
     data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not refresh background render status.");
     job=data.job;
