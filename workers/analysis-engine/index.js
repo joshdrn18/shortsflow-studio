@@ -45,27 +45,141 @@ async function restoreClipAfterYoutubeFailure(env,clipId,now){
   AND p.status IN ('queued','uploading','processing','published'))`).bind(now,clipId).run();
 }
 
+
+function encodeBase64Url(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function encryptSensitiveValue(value, secret) {
+  const raw = decodeBase64(secret);
+  if (raw.length !== TOKEN_KEY_BYTES) throw new Error("Invalid YouTube token encryption key.");
+  const key = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(String(value)));
+  return encodeBase64Url(iv) + "." + encodeBase64Url(new Uint8Array(cipher));
+}
+
+async function createYoutubeUploadSession(accessToken, metadata, size, mimeType) {
+  const response = await fetch("https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + accessToken,
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-Upload-Content-Length": String(size),
+      "X-Upload-Content-Type": mimeType
+    },
+    body: JSON.stringify(metadata)
+  });
+  if (!response.ok) {
+    throw new Error("YouTube upload initialization failed (" + response.status + "): " + (await response.text()).slice(0, 500));
+  }
+  const uploadUrl = response.headers.get("location");
+  if (!uploadUrl || !uploadUrl.startsWith("https://www.googleapis.com/upload/")) {
+    throw new Error("YouTube did not return a valid resumable upload URL.");
+  }
+  return uploadUrl;
+}
+
+async function probeYoutubeUploadSession(uploadUrl, size) {
+  const response = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Length": "0",
+      "Content-Range": "bytes */" + size
+    }
+  });
+  const raw = await response.text().catch(() => "");
+  if (response.status === 200 || response.status === 201) {
+    let result = {};
+    try { result = JSON.parse(raw || "{}"); } catch {}
+    if (!result.id) throw new Error("YouTube reported a completed upload without returning its video ID.");
+    return { complete: true, result };
+  }
+  if (response.status === 308) {
+    const range = response.headers.get("Range") || "";
+    const match = /bytes=0-(\d+)/i.exec(range);
+    return { complete: false, nextOffset: match ? Number(match[1]) + 1 : 0 };
+  }
+  if (response.status === 404 || response.status === 410) return { expired: true };
+  throw new Error("Could not verify the saved YouTube upload session (" + response.status + "): " + raw.slice(0, 400));
+}
+
+async function putYoutubeUploadRemainder(uploadUrl, bytes, size, mimeType, offset) {
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset >= size) {
+    throw new Error("YouTube returned an invalid resumable upload offset.");
+  }
+  const remainder = bytes.slice(offset);
+  const response = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": mimeType,
+      "Content-Length": String(remainder.byteLength),
+      "Content-Range": "bytes " + offset + "-" + (size - 1) + "/" + size
+    },
+    body: remainder
+  });
+  const raw = await response.text().catch(() => "");
+  if (response.status === 308) {
+    throw new Error("YouTube saved part of the video. ShortsFlow will resume from the saved byte position.");
+  }
+  let result = {};
+  try { result = JSON.parse(raw || "{}"); } catch {}
+  if (!response.ok || !result.id) {
+    throw new Error("YouTube video upload failed (" + response.status + "): " + JSON.stringify(result.error || result || raw).slice(0, 500));
+  }
+  return result;
+}
+
+async function markYoutubeJobPublished(env, job, result) {
+  const completedAt = new Date().toISOString();
+  const videoUrl = "https://www.youtube.com/shorts/" + result.id;
+  const saved = await env.DB.batch([
+    env.DB.prepare("UPDATE publishing_jobs SET status='published',platform_video_id=?,platform_url=?,youtube_upload_session_encrypted=NULL,youtube_upload_session_expires_at=NULL,youtube_upload_size=NULL,youtube_upload_mime_type=NULL,last_error=NULL,updated_at=? WHERE id=? AND status='uploading'")
+      .bind(result.id, videoUrl, completedAt, job.id),
+    env.DB.prepare("UPDATE clips SET status='published',updated_at=? WHERE id=?")
+      .bind(completedAt, job.clip_id),
+    env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) SELECT ?,c.workspace_id,'clip',c.id,'youtube.published',?,? FROM clips c WHERE c.id=?")
+      .bind(crypto.randomUUID(), JSON.stringify({ jobId: job.id, videoId: result.id, renderAssetId: job.render_asset_id }), completedAt, job.clip_id),
+    env.DB.prepare("UPDATE autopilot_jobs SET status='published',platform_video_id=?,platform_url=?,published_at=?,updated_at=?,last_error=NULL WHERE publishing_job_id=?")
+      .bind(result.id, videoUrl, completedAt, completedAt, job.id)
+  ]);
+  if (Number(saved[0]?.meta?.changes || 0) !== 1) {
+    throw new Error("YouTube upload completed, but ShortsFlow could not finalize the publishing record. The saved upload session will be checked again.");
+  }
+}
+
+
 async function processYoutubeJob(env) {
-  // Pages Functions use MEDIA; the standalone Worker may use SOURCE_MEDIA.
-  // Accept either binding so both deployments can point at the same private bucket.
   const mediaBucket = env.SOURCE_MEDIA || env.MEDIA;
   if (!env.DB || !mediaBucket || !env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET || !env.YOUTUBE_TOKEN_ENCRYPTION_KEY) return;
+
   const now = new Date().toISOString();
-  // Do not leave uploads stuck forever after a Worker termination. Avoid an
-  // automatic retry because YouTube may have accepted the upload already.
   const staleBefore = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+  // Recover only jobs with a still-valid saved resumable session. Without a
+  // session URL, the outcome is ambiguous and must remain a manual check.
   const stale = await env.DB.prepare(`
     UPDATE publishing_jobs
-    SET status='failed',
-        last_error='Upload worker stopped before confirming the result. Check YouTube Studio before retrying to avoid duplicate uploads.',
+    SET status=CASE
+          WHEN youtube_upload_session_encrypted IS NOT NULL AND youtube_upload_session_expires_at>? THEN 'queued'
+          ELSE 'failed'
+        END,
+        last_error=CASE
+          WHEN youtube_upload_session_encrypted IS NOT NULL AND youtube_upload_session_expires_at>?
+            THEN 'Upload interrupted. ShortsFlow will verify the saved YouTube session and resume safely.'
+          ELSE 'Upload worker stopped before saving a resumable session. Check YouTube Studio before retrying to avoid duplicate uploads.'
+        END,
         updated_at=?
     WHERE platform='youtube' AND status='uploading' AND updated_at<?
-    RETURNING clip_id
-  `).bind(now, staleBefore).all();
+    RETURNING clip_id,status
+  `).bind(now, now, now, staleBefore).all();
+
   for (const row of (stale.results || [])) {
-    await restoreClipAfterYoutubeFailure(env,row.clip_id,now);
+    if (row.status === "failed") await restoreClipAfterYoutubeFailure(env, row.clip_id, now);
   }
-  const workerId = crypto.randomUUID();
+
   const job = await env.DB.prepare(`
     UPDATE publishing_jobs SET status='uploading',attempts=attempts+1,updated_at=?
     WHERE id=(SELECT p.id FROM publishing_jobs p JOIN clips c ON c.id=p.clip_id
@@ -73,11 +187,16 @@ async function processYoutubeJob(env) {
       AND EXISTS(SELECT 1 FROM youtube_connections y WHERE y.workspace_id=c.workspace_id)
       ORDER BY COALESCE(p.scheduled_at,p.created_at),p.created_at LIMIT 1)
     AND status='queued' RETURNING *
-  `).bind(now,now).first();
+  `).bind(now, now).first();
+
   if (!job) return;
+
+  let hasPersistedSession = Boolean(job.youtube_upload_session_encrypted && job.youtube_upload_session_expires_at);
   try {
-    const connection = await env.DB.prepare("SELECT * FROM youtube_connections WHERE workspace_id=(SELECT workspace_id FROM clips WHERE id=?)").bind(job.clip_id).first();
+    const connection = await env.DB.prepare("SELECT * FROM youtube_connections WHERE workspace_id=(SELECT workspace_id FROM clips WHERE id=?)")
+      .bind(job.clip_id).first();
     if (!connection) throw new Error("YouTube channel connection is missing.");
+
     const approved = await env.DB.prepare(`
       SELECT a.storage_key,a.mime_type,a.size_bytes,a.metadata_version,m.version AS current_metadata_version,
         r.id AS review_id
@@ -86,48 +205,120 @@ async function processYoutubeJob(env) {
       JOIN clip_reviews r ON r.id=(SELECT r2.id FROM clip_reviews r2 WHERE r2.clip_id=c.id AND r2.render_asset_id=a.id AND r2.metadata_version=m.version ORDER BY r2.reviewed_at DESC,r2.id DESC LIMIT 1) AND r.decision='approved'
       WHERE a.id=? AND a.clip_id=? AND a.asset_type='render' AND a.metadata_version=m.version
         AND a.metadata_version=? AND a.version=(SELECT MAX(version) FROM clip_assets WHERE clip_id=c.id AND asset_type='render')
-    `).bind(job.render_asset_id,job.clip_id,job.metadata_version).first();
-    if (!approved) throw new Error("Approval no longer matches the latest render. Review the current clip again.");
+        AND r.id=?
+    `).bind(job.render_asset_id, job.clip_id, job.metadata_version, job.review_id).first();
+
+    if (!approved) throw new Error("The exact approval attached to this upload is no longer current. Review and approve the current version again.");
     const object = await mediaBucket.get(approved.storage_key);
     if (!object) throw new Error("Approved render file is missing from private R2 storage.");
+
     const size = Number(approved.size_bytes || object.size || 0);
     if (!size || size > 90 * 1024 * 1024) throw new Error("Render file is empty or exceeds the 90 MB publishing limit.");
-    const refreshToken = await decryptRefreshToken(connection.refresh_token_encrypted,env.YOUTUBE_TOKEN_ENCRYPTION_KEY);
+    const mimeType = approved.mime_type || "video/webm";
+    const rawBytes = await object.arrayBuffer();
+    if (rawBytes.byteLength !== size) throw new Error("Render file size changed while preparing upload.");
+    const bytes = new Uint8Array(rawBytes);
+
+    const refreshToken = await decryptRefreshToken(connection.refresh_token_encrypted, env.YOUTUBE_TOKEN_ENCRYPTION_KEY);
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-      method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},
-      body:new URLSearchParams({client_id:env.YOUTUBE_CLIENT_ID,client_secret:env.YOUTUBE_CLIENT_SECRET,refresh_token:refreshToken,grant_type:"refresh_token"})
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: env.YOUTUBE_CLIENT_ID,
+        client_secret: env.YOUTUBE_CLIENT_SECRET,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token"
+      })
     });
     const tokens = await tokenResponse.json();
-    if (!tokenResponse.ok || !tokens.access_token) throw new Error(tokens.error_description || tokens.error || "Could not refresh YouTube access.");
+    if (!tokenResponse.ok || !tokens.access_token) {
+      throw new Error(tokens.error_description || tokens.error || "Could not refresh YouTube access.");
+    }
+
     const metadata = {
-      snippet:{title:String(job.title || "ShortsFlow Short").slice(0,100),description:String(job.description || "").slice(0,5000),tags:JSON.parse(job.tags_json || "[]"),categoryId:"22"},
-      status:{privacyStatus:job.privacy_status || "private",selfDeclaredMadeForKids:false}
+      snippet: {
+        title: String(job.title || "ShortsFlow Short").slice(0, 100),
+        description: String(job.description || "").slice(0, 5000),
+        tags: JSON.parse(job.tags_json || "[]"),
+        categoryId: "22"
+      },
+      status: { privacyStatus: job.privacy_status || "private", selfDeclaredMadeForKids: false }
     };
-    const mimeType = approved.mime_type || "video/webm";
-    const init = await fetch("https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",{
-      method:"POST",headers:{Authorization:"Bearer "+tokens.access_token,"Content-Type":"application/json; charset=UTF-8","X-Upload-Content-Length":String(size),"X-Upload-Content-Type":mimeType},
-      body:JSON.stringify(metadata)
-    });
-    if (!init.ok) throw new Error("YouTube upload initialization failed ("+init.status+"): "+(await init.text()).slice(0,500));
-    const uploadUrl = init.headers.get("location");
-    if (!uploadUrl) throw new Error("YouTube did not return a resumable upload URL.");
-    const bytes = await object.arrayBuffer();
-    if (bytes.byteLength !== size) throw new Error("Render file size changed while preparing upload.");
-    const uploaded = await fetch(uploadUrl,{method:"PUT",headers:{"Content-Type":mimeType,"Content-Length":String(size)},body:bytes});
-    const result = await uploaded.json().catch(()=>({}));
-    if (!uploaded.ok || !result.id) throw new Error("YouTube video upload failed ("+uploaded.status+"): "+JSON.stringify(result.error || result).slice(0,500));
-    const completedAt = new Date().toISOString();
-    await env.DB.batch([
-      env.DB.prepare("UPDATE publishing_jobs SET status='published',platform_video_id=?,platform_url=?,last_error=NULL,updated_at=? WHERE id=? AND status='uploading'").bind(result.id,"https://www.youtube.com/shorts/"+result.id,completedAt,job.id),
-      env.DB.prepare("UPDATE clips SET status='published',updated_at=? WHERE id=?").bind(completedAt,job.clip_id),
-      env.DB.prepare("INSERT INTO activity_logs (id,workspace_id,entity_type,entity_id,event,details,created_at) SELECT ?,c.workspace_id,'clip',c.id,'youtube.published',?,? FROM clips c WHERE c.id=?").bind(crypto.randomUUID(),JSON.stringify({jobId:job.id,videoId:result.id,renderAssetId:job.render_asset_id}),completedAt,job.clip_id),
-      env.DB.prepare("UPDATE autopilot_jobs SET status='published',platform_video_id=?,platform_url=?,published_at=?,updated_at=?,last_error=NULL WHERE publishing_job_id=?").bind(result.id,"https://www.youtube.com/shorts/"+result.id,completedAt,completedAt,job.id),
-    ]);
+
+    let uploadUrl = null;
+    let resumeExisting = false;
+    const sessionExpiry = Date.parse(job.youtube_upload_session_expires_at || "");
+    const storedSessionMatches = Number(job.youtube_upload_size) === size && String(job.youtube_upload_mime_type || "") === mimeType;
+
+    if (hasPersistedSession && sessionExpiry > Date.now() && storedSessionMatches) {
+      uploadUrl = await decryptRefreshToken(job.youtube_upload_session_encrypted, env.YOUTUBE_TOKEN_ENCRYPTION_KEY);
+      resumeExisting = true;
+    } else if (hasPersistedSession) {
+      await env.DB.prepare("UPDATE publishing_jobs SET youtube_upload_session_encrypted=NULL,youtube_upload_session_expires_at=NULL,youtube_upload_size=NULL,youtube_upload_mime_type=NULL WHERE id=? AND status='uploading'")
+        .bind(job.id).run();
+      hasPersistedSession = false;
+    }
+
+    if (!uploadUrl) {
+      uploadUrl = await createYoutubeUploadSession(tokens.access_token, metadata, size, mimeType);
+      const encryptedSession = await encryptSensitiveValue(uploadUrl, env.YOUTUBE_TOKEN_ENCRYPTION_KEY);
+      const expiresAt = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+      const persisted = await env.DB.prepare(`
+        UPDATE publishing_jobs
+        SET youtube_upload_session_encrypted=?,youtube_upload_session_expires_at=?,youtube_upload_size=?,youtube_upload_mime_type=?
+        WHERE id=? AND status='uploading'
+      `).bind(encryptedSession, expiresAt, size, mimeType, job.id).run();
+      if (Number(persisted.meta?.changes || 0) !== 1) {
+        throw new Error("Publishing job changed before the resumable session could be saved.");
+      }
+      hasPersistedSession = true;
+    }
+
+    let uploadResult = null;
+    if (resumeExisting) {
+      const probe = await probeYoutubeUploadSession(uploadUrl, size);
+      if (probe.complete) {
+        uploadResult = probe.result;
+      } else if (probe.expired) {
+        await env.DB.prepare("UPDATE publishing_jobs SET youtube_upload_session_encrypted=NULL,youtube_upload_session_expires_at=NULL,youtube_upload_size=NULL,youtube_upload_mime_type=NULL WHERE id=? AND status='uploading'")
+          .bind(job.id).run();
+        uploadUrl = await createYoutubeUploadSession(tokens.access_token, metadata, size, mimeType);
+        const encryptedSession = await encryptSensitiveValue(uploadUrl, env.YOUTUBE_TOKEN_ENCRYPTION_KEY);
+        const expiresAt = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
+        const persisted = await env.DB.prepare(`
+          UPDATE publishing_jobs
+          SET youtube_upload_session_encrypted=?,youtube_upload_session_expires_at=?,youtube_upload_size=?,youtube_upload_mime_type=?
+          WHERE id=? AND status='uploading'
+        `).bind(encryptedSession, expiresAt, size, mimeType, job.id).run();
+        if (Number(persisted.meta?.changes || 0) !== 1) {
+          throw new Error("Publishing job changed before the replacement upload session could be saved.");
+        }
+        hasPersistedSession = true;
+        uploadResult = await putYoutubeUploadRemainder(uploadUrl, bytes, size, mimeType, 0);
+      } else {
+        uploadResult = await putYoutubeUploadRemainder(uploadUrl, bytes, size, mimeType, probe.nextOffset);
+      }
+    } else {
+      uploadResult = await putYoutubeUploadRemainder(uploadUrl, bytes, size, mimeType, 0);
+    }
+
+    await markYoutubeJobPublished(env, job, uploadResult);
   } catch (error) {
-    const message=String(error?.message || "YouTube upload failed.").slice(0,1000);
-    const failedAt=new Date().toISOString();
+    const message = String(error?.message || "YouTube upload failed.").slice(0, 1000);
+    const failedAt = new Date().toISOString();
+    const transient = error?.name === "TypeError" || /429|5\\d\\d|timeout|timed out|network|fetch failed|connection reset|temporarily|part of the upload|resume from the saved byte/i.test(message);
+    const retry = hasPersistedSession && transient && Number(job.attempts || 0) < 5;
+
+    if (retry) {
+      await env.DB.prepare("UPDATE publishing_jobs SET status='queued',last_error=?,updated_at=? WHERE id=? AND status='uploading'")
+        .bind("Upload temporarily interrupted. ShortsFlow will verify YouTube's saved byte position before resuming.", failedAt, job.id).run();
+      console.error("youtube_upload_resume_scheduled", job.id, message);
+      return;
+    }
+
     await env.DB.batch([
-      env.DB.prepare("UPDATE publishing_jobs SET status='failed',last_error=?,updated_at=? WHERE id=? AND status='uploading'").bind(message,failedAt,job.id),
+      env.DB.prepare("UPDATE publishing_jobs SET status='failed',last_error=?,updated_at=? WHERE id=? AND status='uploading'")
+        .bind(message, failedAt, job.id),
       env.DB.prepare(`UPDATE clips SET status=CASE WHEN EXISTS(
         SELECT 1 FROM clip_metadata m JOIN clip_assets a ON a.clip_id=m.clip_id AND a.asset_type='render'
          AND a.version=(SELECT MAX(x.version) FROM clip_assets x WHERE x.clip_id=m.clip_id AND x.asset_type='render') AND a.metadata_version=m.version
@@ -135,10 +326,11 @@ async function processYoutubeJob(env) {
         WHERE m.clip_id=clips.id AND m.version=(SELECT MAX(x.version) FROM clip_metadata x WHERE x.clip_id=clips.id)
        ) THEN 'approved' ELSE 'editing' END,updated_at=?
        WHERE id=? AND status='publishing'
-       AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.clip_id=clips.id AND p.platform='youtube' AND p.status IN ('queued','uploading','processing','published'))`).bind(failedAt,job.clip_id)
+       AND NOT EXISTS(SELECT 1 FROM publishing_jobs p WHERE p.clip_id=clips.id AND p.platform='youtube' AND p.status IN ('queued','uploading','processing','published'))`).bind(failedAt, job.clip_id),
+      env.DB.prepare("UPDATE autopilot_jobs SET status='failed',last_error=?,updated_at=? WHERE publishing_job_id=? AND status<>'published'")
+        .bind(message, failedAt, job.id)
     ]);
-    await env.DB.prepare("UPDATE autopilot_jobs SET status='failed',last_error=?,updated_at=? WHERE publishing_job_id=? AND status<>'published'").bind(message,failedAt,job.id).run();
-    console.error("youtube_upload_failed",job.id,message);
+    console.error("youtube_upload_failed", job.id, message);
   }
 }
 
@@ -1749,6 +1941,6 @@ export default {
   },
 
   async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(Promise.all([processNextJob(env), processAutopilot(env)]));
+    ctx.waitUntil(Promise.all([processNextJob(env), processAutopilot(env), processYoutubeJob(env)]));
   }
 };

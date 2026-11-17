@@ -352,8 +352,21 @@
   const btn=$("#publisher-submit");btn.disabled=true;btn.textContent="Queueing…";setMessage("");
   try{
    const scheduled=$("#publisher-schedule").value?new Date($("#publisher-schedule").value).toISOString():null;
-   const response=await fetch("/api/youtube",{method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify({clipId:$("#publisher-clip").value,title:$("#publisher-title").value,description:$("#publisher-description").value,privacyStatus:$("#publisher-privacy").value,scheduledAt:scheduled,tags:$("#publisher-tags").value.split(",").map(x=>x.trim()).filter(Boolean)})});
-   const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not queue upload.");
+   const payload={clipId:$("#publisher-clip").value,title:$("#publisher-title").value,description:$("#publisher-description").value,privacyStatus:$("#publisher-privacy").value,scheduledAt:scheduled,tags:$("#publisher-tags").value.split(",").map(x=>x.trim()).filter(Boolean)};
+   const send=()=>fetch("/api/youtube",{method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify(payload)});
+   let response=await send(),data=await response.json();
+   if(!response.ok||!data.ok){
+    if(response.status===409&&data.code==="CLIP_OVERLAP"){
+     const conflict=data.conflict||{};
+     const range=Number.isFinite(Number(conflict.startSeconds))&&Number.isFinite(Number(conflict.endSeconds))
+      ?Number(conflict.startSeconds).toFixed(1)+"s–"+Number(conflict.endSeconds).toFixed(1)+"s":"an existing source segment";
+     const title=conflict.title||"another queued or published clip";
+     if(!window.confirm("Possible duplicate clip detected.\n\n"+title+" ("+range+") already exists in your YouTube queue/history.\n\nQueue this clip anyway?"))throw new Error("Upload was not queued. The possible duplicate was left unchanged.");
+     payload.allowDuplicateOverlap=true;
+     response=await send();data=await response.json();
+    }
+    if(!response.ok||!data.ok)throw new Error(data.error||"Could not queue upload.");
+   }
    setMessage("Upload job queued. It is not published yet.");$("#publisher-form").reset();renderMetadataPreview();await load();
   }catch(err){setMessage(err.message,true);}
   finally{btn.disabled=!state.connection?.connected||!state.eligible.length;btn.innerHTML='Queue upload <span>→</span>';}
