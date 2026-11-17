@@ -108,7 +108,7 @@
       const r=await fetch("/api/jobs",{headers:{accept:"application/json"}});
       const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||"Could not load queue.");
       if(!d.jobs.length){list.innerHTML='<div class="sources-empty"><b>No processing jobs yet</b><p>Queue analysis from a source video when ready.</p></div>';return;}
-      list.innerHTML=d.jobs.map(j=>{const status=String(j.status||"").trim().toLowerCase();return '<article class="job-row"><div class="job-file-icon">✳</div><div class="source-file-info"><strong>'+esc(j.source_title)+'</strong><small>'+esc(String(j.job_type||"").replaceAll("_"," "))+' · '+esc(new Date(j.created_at).toLocaleString())+' · '+Number(j.attempts)+'/'+Number(j.max_attempts)+' attempts</small>'+(j.last_error?'<small class="error-text">'+esc(j.last_error)+'</small>':'')+'</div><span class="source-status job-'+esc(status)+'">'+esc(status||"unknown")+'</span><div class="job-row-actions">'+(status==="queued"?'<button type="button" class="text-button job-action-btn job-cancel-button" data-job-id="'+esc(j.id)+'" data-action="cancel">Cancel job</button>':status==="failed"?'<button type="button" class="text-button job-action-btn" data-job-id="'+esc(j.id)+'" data-action="retry">Retry</button>':status==="claimed"||status==="running"?'<span class="job-running-note">In progress · cannot safely cancel mid-process</span>':"")+'</div></article>'}).join("");
+      list.innerHTML=d.jobs.map(j=>{const status=String(j.status||"").trim().toLowerCase();return '<article class="job-row"><div class="job-file-icon">✳</div><div class="source-file-info"><strong>'+esc(j.source_title)+'</strong><small>'+esc(String(j.job_type||"").replaceAll("_"," "))+' · '+esc(new Date(j.created_at).toLocaleString())+' · '+Number(j.attempts)+'/'+Number(j.max_attempts)+' attempts'+(Number(j.totalChunks)>0?' · '+Math.min(Number(j.progressChunks||0),Number(j.totalChunks))+'/'+Number(j.totalChunks)+' audio segments':'')+'</small>'+(j.last_error?'<small class="error-text">'+esc(j.last_error)+'</small>':'')+'</div><span class="source-status job-'+esc(status)+'">'+esc(status||"unknown")+'</span><div class="job-row-actions">'+(status==="queued"?'<button type="button" class="text-button job-action-btn job-cancel-button" data-job-id="'+esc(j.id)+'" data-action="cancel">Cancel job</button>':status==="failed"?'<button type="button" class="text-button job-action-btn" data-job-id="'+esc(j.id)+'" data-action="retry">Retry</button>':status==="claimed"||status==="running"?'<span class="job-running-note">In progress · cannot safely cancel mid-process</span>':"")+'</div></article>'}).join("");
       list.querySelectorAll(".job-action-btn").forEach(btn=>btn.addEventListener("click",()=>updateJob(btn.dataset.jobId,btn.dataset.action,btn)));
     } catch(e){list.innerHTML='<div class="sources-empty error"><b>Queue unavailable</b><p>'+esc(e.message)+'</p></div>';}
     finally{jobsLoading=false;}
@@ -206,13 +206,15 @@
         return job;
       }
       if(job?.status==="failed"||job?.status==="cancelled") {
-        throw new Error(job.last_error||"Server transcription failed. Retry analysis from Source Library.");
+        const error=new Error(job.last_error||"Server transcription failed. Retry analysis from Source Library.");
+        error.browserFallback=job.status==="failed"&&/Audio extraction failed for this video/i.test(String(job.last_error||""));
+        throw error;
       }
       const chunks=Math.min(totalChunks,Number(job?.progressChunks||0));
       const percent=8+Math.round(chunks/totalChunks*78);
       if(percent!==lastProgress) {
-        const state=job?.status==="running"?"Processing on Cloudflare":"Waiting for the Cloudflare analysis queue";
-        progress(state+" · audio segment "+Math.min(totalChunks,Math.max(1,chunks+1))+" of "+totalChunks+"…",percent);
+        const state=job?.status==="running"?"Cloudflare is transcribing in the background":"Waiting for the Cloudflare analysis queue";
+        progress(state+" · audio segment "+Math.min(totalChunks,Math.max(1,chunks+1))+" of "+totalChunks+". You can leave this tab; processing continues on the server.",percent);
         lastProgress=percent;
       }
       await waitForServerPoll(30000);
@@ -233,7 +235,13 @@
       if(source.mimeType!=="video/mp4")throw new Error("AI analysis currently requires an MP4 source. Re-export this video as MP4, then retry.");
       const updateProgress=(message,value)=>{status.textContent=message;bar.style.width=value+"%";pct.textContent=value+"%";};
       if(Number.isFinite(size)&&size>0&&size<100*1024*1024) {
-        await transcribeSourceOnServer(sourceId,duration,updateProgress);
+        try {
+          await transcribeSourceOnServer(sourceId,duration,updateProgress);
+        } catch(error) {
+          if(!error.browserFallback)throw error;
+          updateProgress("This MP4 codec is not supported by server extraction · switching to browser fallback…",2);
+          await transcribeSourceInBrowser(sourceId,duration,updateProgress);
+        }
       } else {
         updateProgress("Large MP4 detected · using browser fallback (this can use more RAM)…",2);
         await transcribeSourceInBrowser(sourceId,duration,updateProgress);
