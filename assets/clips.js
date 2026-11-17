@@ -4,7 +4,7 @@
   const time = value => { const seconds=Math.max(0,Math.floor(Number(value)||0)); return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0"); };
   const clock = value => { const seconds=Math.max(0,Number(value)||0),whole=Math.floor(seconds);return Math.floor(whole/60)+":"+String(whole%60).padStart(2,"0")+"."+Math.floor((seconds-whole)*10); };
   const dateTime = value => { if(!value)return "—";const date=new Date(value);if(!Number.isFinite(date.getTime()))return "—";return new Intl.DateTimeFormat(undefined,{year:"numeric",month:"short",day:"2-digit",hour:"2-digit",minute:"2-digit"}).format(date); };
-  let activeClip=null, clipStart=0, clipEnd=0, busy=false;
+  let activeClip=null, clipStart=0, clipEnd=0, busy=false, clipsLoading=false;
   const selectedClipIds = new Set();
 
   function ensurePanel() {
@@ -97,7 +97,7 @@
   function syncClipSelection(){const clips=window.__shortsflowClipCache||[],count=selectedClipIds.size,button=$("#clips-delete-selected"),all=$("#clips-select-all");if(button){button.disabled=count===0;button.textContent="Delete selected ("+count+")";}if(all){all.checked=clips.length>0&&clips.every(c=>selectedClipIds.has(String(c.id)));all.indeterminate=count>0&&!all.checked;}document.querySelectorAll(".clip-select-one").forEach(input=>input.checked=selectedClipIds.has(input.dataset.clipId));}
   async function deleteClips(ids){const clipIds=[...new Set(ids.map(String))];if(!clipIds.length||busy)return;if(!window.confirm("Delete "+clipIds.length+" selected clip candidate(s)? Rendered files and review records will also be removed. Original source videos stay safe."))return;busy=true;const button=$("#clips-delete-selected");if(button){button.disabled=true;button.textContent="Deleting…";}try{const response=await fetch("/api/clips",{method:"DELETE",headers:{"content-type":"application/json","accept":"application/json"},body:JSON.stringify({clipIds})});const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not delete clips.");clipIds.forEach(id=>selectedClipIds.delete(id));if(activeClip&&clipIds.includes(String(activeClip.id)))closePreview();await load();}catch(error){window.alert(error.message||"Could not delete selected clips.");}finally{busy=false;syncClipSelection();}}
   async function load(){
-    const list=$("#clips-list");if(!list)return;list.innerHTML='<div class="sources-empty"><b>Loading clip candidates…</b></div>';
+    const list=$("#clips-list");if(!list||clipsLoading)return;clipsLoading=true;list.innerHTML='<div class="sources-empty"><b>Loading clip candidates…</b></div>';
     try{
       const response=await fetch("/api/clips",{headers:{accept:"application/json"}}),data=await response.json();
       if(!response.ok||!data.ok)throw new Error(data.error||"Could not load clip candidates.");
@@ -124,10 +124,12 @@
       }));
       list.querySelectorAll(".clip-select-one").forEach(input=>input.addEventListener("change",()=>{input.checked?selectedClipIds.add(input.dataset.clipId):selectedClipIds.delete(input.dataset.clipId);syncClipSelection();}));syncClipSelection();
     }catch(error){list.innerHTML='<div class="sources-empty error"><b>Could not load clip candidates</b><p>'+esc(error.message)+'</p></div>';}
+    finally{clipsLoading=false;}
   }
   document.addEventListener("DOMContentLoaded",()=>{
     ensurePanel();
     document.addEventListener("shortsflow:view",event=>{if(event.detail?.view!=="clips")return;ensurePanel();$("#clips-workspace").classList.remove("hidden");load();});
-    window.setInterval(()=>{const panel=$("#clips-workspace");if(panel&&!panel.classList.contains("hidden")&&!$("#clip-preview-dialog")?.open)load();},20000);
+    window.setInterval(()=>{const panel=$("#clips-workspace");if(document.visibilityState!=="hidden"&&panel&&!panel.classList.contains("hidden")&&!$("#clip-preview-dialog")?.open)load();},60000);
+    document.addEventListener("visibilitychange",()=>{const panel=$("#clips-workspace");if(document.visibilityState==="visible"&&panel&&!panel.classList.contains("hidden")&&!$("#clip-preview-dialog")?.open)load();});
   });
 })();

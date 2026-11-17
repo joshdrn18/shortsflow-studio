@@ -1,6 +1,7 @@
 (() => {
   const $ = (s) => document.querySelector(s);
   const allowed = new Set(["video/mp4","video/quicktime","video/webm","video/x-matroska","video/ogg"]);
+  let jobsLoading=false;
   const esc = (v) => String(v).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const bytes = (n) => { if (!n) return "—"; const u=["B","KB","MB","GB"]; const i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),3); return (n/1024**i).toFixed(i?1:0)+" "+u[i]; };
   function formatDuration(value) { const n=Number(value); if(!Number.isFinite(n)||n<=0)return 'duration unavailable'; const s=Math.floor(n); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); }
@@ -28,7 +29,7 @@
       const r=await fetch("/api/sources",{headers:{accept:"application/json"}});
       const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||"Could not load sources.");
       $("#source-count").textContent=d.sources.length;
-      if(!d.sources.length){list.innerHTML='<div class="source-empty-state"><div class="source-empty-icon">▤</div><b>Your library is ready</b><p>Upload your first video to create a searchable library and discover clips with AI.</p><button type="button" class="text-button" id="empty-upload-btn">＋ Add your first video</button></div>';$("#empty-upload-btn").addEventListener("click",()=>$("#source-file").click());return;}
+      if(!d.sources.length){list.innerHTML='<div class="source-empty-state"><div class="source-empty-icon">▤</div><b>Your library is ready</b><p>Upload your first video to create a searchable library and discover clips with AI.</p><button type="button" class="text-button" id="empty-upload-btn">＋ Add your first video</button></div>';$("#empty-upload-btn").addEventListener("click",()=>$("#source-file").click());await loadJobs();return;}
       list.innerHTML=d.sources.map(s=>'<article class="source-card"><div class="source-card-visual"><span class="source-card-play">▶</span><span class="source-card-duration">'+esc(formatDuration(s.durationSeconds))+'</span><span class="source-card-format">'+esc((s.mimeType||"video").replace("video/","").toUpperCase())+'</span></div><div class="source-card-body"><div class="source-card-title"><strong title="'+esc(s.title)+'">'+esc(s.title)+'</strong><span class="source-status source-status-'+esc(s.status)+'">'+esc(s.status)+'</span></div><div class="source-card-details"><span>'+bytes(s.sizeBytes)+'</span><i></i><span>'+esc(new Date(s.createdAt).toLocaleDateString())+'</span></div><div class="source-card-actions"><button type="button" class="source-action-main preview-source-btn" data-source-id="'+esc(s.id)+'" data-source-title="'+esc(s.title)+'">Preview video</button><button type="button" class="source-action-icon queue-source-btn" title="Queue AI analysis" aria-label="Queue AI analysis" data-source-id="'+esc(s.id)+'">✳</button><button type="button" class="source-action-icon view-transcript-btn" title="View transcript" aria-label="View transcript" data-source-id="'+esc(s.id)+'" '+(s.transcriptStatus==="completed"?"":"disabled")+'>CC</button><button type="button" class="source-action-icon delete-source-btn" title="Delete source and generated files" aria-label="Delete source" data-source-id="'+esc(s.id)+'">✕</button></div></div></article>').join("");
       list.querySelectorAll(".queue-source-btn").forEach(btn=>btn.addEventListener("click",()=>queueSource(btn.dataset.sourceId,btn).catch(()=>{})));
       list.querySelectorAll(".preview-source-btn").forEach(btn=>btn.addEventListener("click",()=>openPreview(btn.dataset.sourceId,btn.dataset.sourceTitle)));
@@ -101,7 +102,8 @@
     } catch(e){text.textContent=e.message;meta.textContent="Transcript unavailable";activeTranscriptVtt="";dialog.showModal();}
   }
   async function loadJobs() {
-    const list=$("#jobs-list"); if(!list) return;
+    const list=$("#jobs-list"); if(!list||jobsLoading) return;
+    jobsLoading=true;
     try {
       const r=await fetch("/api/jobs",{headers:{accept:"application/json"}});
       const d=await r.json(); if(!r.ok||!d.ok) throw new Error(d.error||"Could not load queue.");
@@ -109,6 +111,7 @@
       list.innerHTML=d.jobs.map(j=>{const status=String(j.status||"").trim().toLowerCase();return '<article class="job-row"><div class="job-file-icon">✳</div><div class="source-file-info"><strong>'+esc(j.source_title)+'</strong><small>'+esc(String(j.job_type||"").replaceAll("_"," "))+' · '+esc(new Date(j.created_at).toLocaleString())+' · '+Number(j.attempts)+'/'+Number(j.max_attempts)+' attempts</small>'+(j.last_error?'<small class="error-text">'+esc(j.last_error)+'</small>':'')+'</div><span class="source-status job-'+esc(status)+'">'+esc(status||"unknown")+'</span><div class="job-row-actions">'+(status==="queued"?'<button type="button" class="text-button job-action-btn job-cancel-button" data-job-id="'+esc(j.id)+'" data-action="cancel">Cancel job</button>':status==="failed"?'<button type="button" class="text-button job-action-btn" data-job-id="'+esc(j.id)+'" data-action="retry">Retry</button>':status==="claimed"||status==="running"?'<span class="job-running-note">In progress · cannot safely cancel mid-process</span>':"")+'</div></article>'}).join("");
       list.querySelectorAll(".job-action-btn").forEach(btn=>btn.addEventListener("click",()=>updateJob(btn.dataset.jobId,btn.dataset.action,btn)));
     } catch(e){list.innerHTML='<div class="sources-empty error"><b>Queue unavailable</b><p>'+esc(e.message)+'</p></div>';}
+    finally{jobsLoading=false;}
   }
   async function updateJob(jobId,action,button) {
     const label=action==="cancel"?"Cancel":"Retry";
@@ -124,45 +127,49 @@
     const { FFmpeg } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js");
     const { toBlobURL } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js");
     const ffmpeg = new FFmpeg();
-    progress("Loading local video processor…",2);
-    const coreBase="https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
-    await ffmpeg.load({
-      classWorkerURL:location.origin+"/assets/ffmpeg-worker.js",
-      coreURL:await toBlobURL(coreBase+"/ffmpeg-core.js","text/javascript"),
-      wasmURL:await toBlobURL(coreBase+"/ffmpeg-core.wasm","application/wasm")
-    });
-    progress("Fetching your private source video…",5);
-    const response=await fetch("/api/sources/"+encodeURIComponent(sourceId),{cache:"no-store"});
-    if(!response.ok)throw new Error("Could not read the private source video.");
-    const sourceBlob=await response.blob();
-    if(sourceBlob.size>200*1024*1024)throw new Error("Source exceeds the 200 MB analysis limit.");
-    const mime=response.headers.get("Content-Type")||"video/mp4";
-    if(!mime.includes("mp4"))throw new Error("Browser audio extraction currently requires an MP4 source.");
-    await ffmpeg.writeFile("source.mp4",new Uint8Array(await sourceBlob.arrayBuffer()));
-    progress("Extracting audio into 60-second chunks…",8);
-    const exit=await ffmpeg.exec(["-i","source.mp4","-map","0:a:0","-vn","-ac","1","-ar","16000","-c:a","pcm_s16le","-f","segment","-segment_time","60","-reset_timestamps","1","audio-%03d.wav"]);
-    if(exit!==0)throw new Error("Audio extraction failed. Check that the MP4 contains an audio track.");
-    const total=Math.ceil(durationSeconds/60);
-    let transcriptId="";
-    for(let index=0;index<total;index++){
-      const filename="audio-"+String(index).padStart(3,"0")+".wav";
-      let audio;
-      try{audio=await ffmpeg.readFile(filename);}catch{throw new Error("Audio chunk "+(index+1)+" of "+total+" could not be extracted.");}
-      if(!(audio instanceof Uint8Array)||audio.byteLength<128)throw new Error("Audio chunk "+(index+1)+" is empty.");
-      progress("Transcribing audio chunk "+(index+1)+" of "+total+"…",10+Math.round((index/total)*85));
-      const result=await fetch("/api/sources/"+encodeURIComponent(sourceId)+"/transcribe",{
-        method:"POST",
-        headers:{"Content-Type":"audio/wav","X-Chunk-Index":String(index),"X-Total-Chunks":String(total),"X-Transcript-Id":transcriptId},
-        body:audio
+    try {
+      progress("Loading local video processor…",2);
+      const coreBase="https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm";
+      await ffmpeg.load({
+        classWorkerURL:location.origin+"/assets/ffmpeg-worker.js",
+        coreURL:await toBlobURL(coreBase+"/ffmpeg-core.js","text/javascript"),
+        wasmURL:await toBlobURL(coreBase+"/ffmpeg-core.wasm","application/wasm")
       });
-      const data=await result.json().catch(()=>({}));
-      if(!result.ok||!data.ok)throw new Error(data.error||"Transcription failed on chunk "+(index+1)+".");
-      transcriptId=data.transcriptId||transcriptId;
-      await ffmpeg.deleteFile(filename).catch(()=>{});
+      progress("Fetching your private source video…",5);
+      const response=await fetch("/api/sources/"+encodeURIComponent(sourceId),{cache:"no-store"});
+      if(!response.ok)throw new Error("Could not read the private source video.");
+      let sourceBuffer=await response.arrayBuffer();
+      if(sourceBuffer.byteLength>200*1024*1024)throw new Error("Source exceeds the 200 MB analysis limit.");
+      const mime=response.headers.get("Content-Type")||"video/mp4";
+      if(!mime.includes("mp4"))throw new Error("Browser audio extraction currently requires an MP4 source.");
+      await ffmpeg.writeFile("source.mp4",new Uint8Array(sourceBuffer));
+      sourceBuffer=null;
+      progress("Extracting audio into 60-second chunks…",8);
+      const exit=await ffmpeg.exec(["-i","source.mp4","-map","0:a:0","-vn","-ac","1","-ar","16000","-c:a","pcm_s16le","-f","segment","-segment_time","60","-reset_timestamps","1","audio-%03d.wav"]);
+      if(exit!==0)throw new Error("Audio extraction failed. Check that the MP4 contains an audio track.");
+      const total=Math.ceil(durationSeconds/60);
+      let transcriptId="";
+      for(let index=0;index<total;index++){
+        const filename="audio-"+String(index).padStart(3,"0")+".wav";
+        let audio;
+        try{audio=await ffmpeg.readFile(filename);}catch{throw new Error("Audio chunk "+(index+1)+" of "+total+" could not be extracted.");}
+        if(!(audio instanceof Uint8Array)||audio.byteLength<128)throw new Error("Audio chunk "+(index+1)+" is empty.");
+        progress("Transcribing audio chunk "+(index+1)+" of "+total+"…",10+Math.round((index/total)*85));
+        const result=await fetch("/api/sources/"+encodeURIComponent(sourceId)+"/transcribe",{
+          method:"POST",
+          headers:{"Content-Type":"audio/wav","X-Chunk-Index":String(index),"X-Total-Chunks":String(total),"X-Transcript-Id":transcriptId},
+          body:audio
+        });
+        const data=await result.json().catch(()=>({}));
+        if(!result.ok||!data.ok)throw new Error(data.error||"Transcription failed on chunk "+(index+1)+".");
+        transcriptId=data.transcriptId||transcriptId;
+        await ffmpeg.deleteFile(filename).catch(()=>{});
+      }
+      await ffmpeg.deleteFile("source.mp4").catch(()=>{});
+      progress("Transcription complete. Clip discovery is queued…",100);
+    } finally {
+      try{ffmpeg.terminate();}catch{}
     }
-    await ffmpeg.deleteFile("source.mp4").catch(()=>{});
-    await ffmpeg.terminate();
-    progress("Transcription complete. Clip discovery is queued…",100);
   }
   async function queueSource(sourceId,button) {
     if(button){button.disabled=true;button.textContent="Preparing…";}
@@ -185,12 +192,12 @@
   async function waitForDiscoveredClip(sourceId,progress){
     const deadline=Date.now()+20*60*1000;
     while(Date.now()<deadline){
-      const response=await fetch("/api/clips",{headers:{accept:"application/json"},cache:"no-store"});
+      const response=await fetch("/api/clips?sourceId="+encodeURIComponent(sourceId),{headers:{accept:"application/json"},cache:"no-store"});
       const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not check discovered clips.");
       const clips=(data.clips||[]).filter(item=>String(item.sourceId)===String(sourceId));
       if(clips.length)return clips.sort((a,b)=>Number(b.score||0)-Number(a.score||0))[0];
       progress("AI is finding the strongest moments…",92);
-      await new Promise(resolve=>setTimeout(resolve,10000));
+      await new Promise(resolve=>setTimeout(resolve,15000));
     }
     throw new Error("AI discovery is taking longer than expected. Your upload and transcript are saved; refresh Clip Discovery later.");
   }
@@ -263,8 +270,9 @@
   }
   document.addEventListener("DOMContentLoaded",()=>{
     ensurePanel();
-    const input=$("#source-file"); loadJobs();
-    setInterval(()=>{const panel=$("#sources-workspace");if(panel&&!panel.classList.contains("hidden"))loadJobs();},15000);
+    const input=$("#source-file");
+    setInterval(()=>{const panel=$("#sources-workspace");if(panel&&!panel.classList.contains("hidden")&&document.visibilityState!=="hidden")loadJobs();},60000);
+    document.addEventListener("visibilitychange",()=>{const panel=$("#sources-workspace");if(document.visibilityState==="visible"&&panel&&!panel.classList.contains("hidden"))loadJobs();});
     $("#source-preview-close").addEventListener("click",()=>{const dialog=$("#source-preview-dialog");$("#source-preview-video").pause();$("#source-preview-video").removeAttribute("src");$("#source-preview-video").load();if(dialog.close)dialog.close();else dialog.removeAttribute("open");});
     $("#source-preview-dialog").addEventListener("click",event=>{if(event.target.id==="source-preview-dialog")$("#source-preview-close").click();});
     $("#source-transcript-close").addEventListener("click",()=>$("#source-transcript-dialog").close());
