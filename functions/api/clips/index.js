@@ -5,9 +5,12 @@ export async function onRequestGet({ request, env }) {
   const user = await getSessionUser(request, env);
   if (!user) return json({ ok: false, error: "Authentication required." }, 401);
   if (!user.workspace?.id) return json({ ok: false, error: "No workspace is assigned to this account." }, 403);
+  const sourceId = new URL(request.url).searchParams.get("sourceId");
+  if (sourceId && !/^[0-9a-f-]{36}$/i.test(sourceId)) return json({ ok: false, error: "Invalid source ID." }, 400);
 
   try {
-    const result = await env.DB.prepare(
+    const sourceFilter = sourceId ? "AND c.source_video_id = ?" : "";
+    const statement = env.DB.prepare(
       `SELECT c.id, c.source_video_id, s.title AS source_title, COALESCE(m.title, c.title) AS title,
               c.start_seconds, c.end_seconds, s.duration_seconds AS source_duration,
               c.hook, c.ai_score, c.transcript, c.score_breakdown_json, c.status, c.created_at,
@@ -16,10 +19,13 @@ export async function onRequestGet({ request, env }) {
        JOIN source_videos s ON s.id = c.source_video_id AND s.workspace_id = c.workspace_id
        LEFT JOIN clip_metadata m ON m.clip_id = c.id
          AND m.version = (SELECT MAX(m2.version) FROM clip_metadata m2 WHERE m2.clip_id = c.id)
-       WHERE c.workspace_id = ?
+       WHERE c.workspace_id = ? ${sourceFilter}
        ORDER BY c.ai_score DESC, c.created_at DESC
        LIMIT 100`
-    ).bind(user.workspace.id).all();
+    );
+    const result = sourceId
+      ? await statement.bind(user.workspace.id, sourceId).all()
+      : await statement.bind(user.workspace.id).all();
 
     return json({
       ok: true,
