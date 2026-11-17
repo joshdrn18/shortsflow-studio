@@ -4,7 +4,7 @@ import json
 import shlex
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = "20261117-publisher-light1"
+BUILD = "20261117-pipeline-light1"
 
 class Assets(HTMLParser):
     def __init__(self):
@@ -96,6 +96,27 @@ if "decision===\"approved\"" not in publisher_js or "Review Center" not in publi
     raise SystemExit("Publisher approval selection or explanatory review gate is missing.")
 if "admin-control.js" not in html or "admin-control.css" not in html or "admin-actions.js" not in html or "admin-actions.css" not in html:
     raise SystemExit("Admin control center assets are not linked.")
+sources_js = (ROOT / "assets/sources.js").read_text(encoding="utf-8")
+clips_js = (ROOT / "assets/clips.js").read_text(encoding="utf-8")
+render_queue_js = (ROOT / "assets/rendering-queue.js").read_text(encoding="utf-8")
+render_studio_js = (ROOT / "assets/render-studio.js").read_text(encoding="utf-8")
+clips_api = (ROOT / "functions/api/clips/index.js").read_text(encoding="utf-8")
+if "},60000);" not in sources_js or 'document.visibilityState!=="hidden"' not in sources_js:
+    raise SystemExit("Source job polling must run every 60 seconds only while the tab is visible.")
+if "setInterval(()=>{const panel=$(\"#clips-workspace\")" not in clips_js or "},60000);" not in clips_js or 'document.visibilityState!=="hidden"' not in clips_js:
+    raise SystemExit("Clip Discovery polling must be throttled to 60 seconds and pause in hidden tabs.")
+if "setInterval(()=>{if(document.visibilityState!==\"hidden\")load();},30000);" not in render_queue_js:
+    raise SystemExit("Rendering Queue polling must run every 30 seconds only while the tab is visible.")
+if 'await wait(document.visibilityState==="hidden"?60000:10000);' not in render_studio_js or 'document.addEventListener("visibilitychange",onVisibility)' not in render_studio_js:
+    raise SystemExit("Render status polling must slow while hidden and resume immediately when visible.")
+if 'fetch("/api/clips?sourceId="+encodeURIComponent(sourceId)' not in sources_js:
+    raise SystemExit("Autopilot must request clips for its current source only.")
+if 'const sourceFilter = sourceId ? "AND c.source_video_id = ?" : "";' not in clips_api or "Invalid source ID." not in clips_api:
+    raise SystemExit("Clip API source-specific discovery filter is missing or unvalidated.")
+if 'let sourceBuffer=await response.arrayBuffer();' not in sources_js or 'finally {\n      try{ffmpeg.terminate();}catch{}' not in sources_js:
+    raise SystemExit("Browser FFmpeg must use a single response buffer and always terminate the worker.")
+print("OK: Sources, Clip Discovery, rendering queue and render-status polling are throttled and visibility-aware.")
+print("OK: Autopilot discovery is source-filtered and browser FFmpeg always terminates.")
 print("OK: Publisher background refresh only checks queue status every 60 seconds and pauses in hidden tabs.")
 print("OK: global admin access is separate from workspace owner permissions.")
 if 'admin.systemRole !== "admin"' not in admin_actions_api:
