@@ -7,7 +7,7 @@ import os
 import time
 
 BASE_URL = os.environ.get("SHORTSFLOW_BASE_URL", "https://shortsflow-studio.pages.dev").rstrip("/")
-BUILD = "20261115-publisher-suite1"
+BUILD = "20261117-publisher-light1"
 TIMEOUT_SECONDS = 240
 RETRY_SECONDS = 5
 
