@@ -111,6 +111,8 @@ if 'await wait(document.visibilityState==="hidden"?60000:10000);' not in render_
     raise SystemExit("Render status polling must slow while hidden and resume immediately when visible.")
 if 'fetch("/api/clips?sourceId="+encodeURIComponent(sourceId)' not in sources_js:
     raise SystemExit("Autopilot must request clips for its current source only.")
+if 'const clipsUrl=clip.sourceId?"/api/clips?sourceId="+encodeURIComponent(clip.sourceId):"/api/clips";' not in render_studio_js:
+    raise SystemExit("Render version refresh must use the source-filtered clips endpoint when possible.")
 if 'const sourceFilter = sourceId ? "AND c.source_video_id = ?" : "";' not in clips_api or "Invalid source ID." not in clips_api:
     raise SystemExit("Clip API source-specific discovery filter is missing or unvalidated.")
 if 'let sourceBuffer=await response.arrayBuffer();' not in sources_js or 'finally {\n      try{ffmpeg.terminate();}catch{}' not in sources_js:
