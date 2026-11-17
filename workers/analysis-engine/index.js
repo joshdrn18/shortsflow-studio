@@ -250,13 +250,17 @@ async function processYoutubeJob(env) {
     const sessionExpiry = Date.parse(job.youtube_upload_session_expires_at || "");
     const storedSessionMatches = Number(job.youtube_upload_size) === size && String(job.youtube_upload_mime_type || "") === mimeType;
 
-    if (hasPersistedSession && sessionExpiry > Date.now() && storedSessionMatches) {
+    if (hasPersistedSession) {
+      // Never create a fresh upload after an old session expires or no longer
+      // matches its source file: YouTube may already have accepted the bytes.
+      if (sessionExpiry <= Date.now()) {
+        throw new Error("Saved YouTube upload session expired. Check YouTube Studio before retrying to avoid a duplicate video.");
+      }
+      if (!storedSessionMatches) {
+        throw new Error("Saved YouTube upload session does not match the current render. Check YouTube Studio before retrying.");
+      }
       uploadUrl = await decryptRefreshToken(job.youtube_upload_session_encrypted, env.YOUTUBE_TOKEN_ENCRYPTION_KEY);
       resumeExisting = true;
-    } else if (hasPersistedSession) {
-      await env.DB.prepare("UPDATE publishing_jobs SET youtube_upload_session_encrypted=NULL,youtube_upload_session_expires_at=NULL,youtube_upload_size=NULL,youtube_upload_mime_type=NULL WHERE id=? AND status='uploading'")
-        .bind(job.id).run();
-      hasPersistedSession = false;
     }
 
     if (!uploadUrl) {
@@ -280,21 +284,7 @@ async function processYoutubeJob(env) {
       if (probe.complete) {
         uploadResult = probe.result;
       } else if (probe.expired) {
-        await env.DB.prepare("UPDATE publishing_jobs SET youtube_upload_session_encrypted=NULL,youtube_upload_session_expires_at=NULL,youtube_upload_size=NULL,youtube_upload_mime_type=NULL WHERE id=? AND status='uploading'")
-          .bind(job.id).run();
-        uploadUrl = await createYoutubeUploadSession(tokens.access_token, metadata, size, mimeType);
-        const encryptedSession = await encryptSensitiveValue(uploadUrl, env.YOUTUBE_TOKEN_ENCRYPTION_KEY);
-        const expiresAt = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
-        const persisted = await env.DB.prepare(`
-          UPDATE publishing_jobs
-          SET youtube_upload_session_encrypted=?,youtube_upload_session_expires_at=?,youtube_upload_size=?,youtube_upload_mime_type=?
-          WHERE id=? AND status='uploading'
-        `).bind(encryptedSession, expiresAt, size, mimeType, job.id).run();
-        if (Number(persisted.meta?.changes || 0) !== 1) {
-          throw new Error("Publishing job changed before the replacement upload session could be saved.");
-        }
-        hasPersistedSession = true;
-        uploadResult = await putYoutubeUploadRemainder(uploadUrl, bytes, size, mimeType, 0);
+        throw new Error("Saved YouTube upload session expired before completion could be confirmed. Check YouTube Studio before retrying to avoid a duplicate video.");
       } else {
         uploadResult = await putYoutubeUploadRemainder(uploadUrl, bytes, size, mimeType, probe.nextOffset);
       }
