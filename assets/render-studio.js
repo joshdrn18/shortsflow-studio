@@ -191,7 +191,8 @@
    document.addEventListener("visibilitychange",onVisibility);
   });
   const refreshVersion=async()=>{
-   const response=await fetch("/api/clips",{headers:{accept:"application/json"},cache:"no-store"});
+   const clipsUrl=clip.sourceId?"/api/clips?sourceId="+encodeURIComponent(clip.sourceId):"/api/clips";
+   const response=await fetch(clipsUrl,{headers:{accept:"application/json"},cache:"no-store"});
    const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.error||"Could not refresh the saved clip version.");
    const latest=(data.clips||[]).find(item=>String(item.id)===String(clip.id));
    if(!latest)throw new Error("This clip is no longer available.");
