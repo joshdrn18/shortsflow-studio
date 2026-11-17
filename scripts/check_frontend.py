@@ -69,11 +69,15 @@ if f'BUILD = "{BUILD}"' not in smoke_test:
     raise SystemExit("Production smoke-test build marker is out of sync with the frontend.");
 
 publisher_js = (ROOT / "assets/publisher.js").read_text(encoding="utf-8")
-for marker in ("publisher-calendar-grid", "publisher-checklist-items", "publisher-ranking-list", "publisher-export-csv", "publisher-notifications-list"):
+for marker in ("publisher-calendar-grid", "publisher-checklist-items", "publisher-ranking-list", "publisher-insights-summary", "publisher-insights-cards", "renderGrowthInsights", "publisher-export-csv", "publisher-notifications-list"):
     if marker not in publisher_js:
         raise SystemExit(f"Publisher workspace tool is missing: {marker}")
 if 'fetch("/api/library"' not in publisher_js or 'fetch("/api/youtube"' not in publisher_js:
     raise SystemExit("Publisher tools must reuse existing library and YouTube APIs.")
+analytics_api = (ROOT / "functions/api/youtube/analytics.js").read_text(encoding="utf-8")
+for field in ("previous_views", "previous_likes", "previous_comments"):
+    if field not in analytics_api:
+        raise SystemExit(f"Growth Insights snapshot comparison field is missing: {field}")
 if "decision===\"approved\"" not in publisher_js or "Review Center" not in publisher_js:
     raise SystemExit("Publisher approval selection or explanatory review gate is missing.")
 if "admin-control.js" not in html or "admin-control.css" not in html or "admin-actions.js" not in html or "admin-actions.css" not in html:
