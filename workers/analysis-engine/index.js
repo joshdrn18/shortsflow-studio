@@ -306,7 +306,7 @@ async function processYoutubeJob(env) {
   } catch (error) {
     const message = String(error?.message || "YouTube upload failed.").slice(0, 1000);
     const failedAt = new Date().toISOString();
-    const transient = error?.name === "TypeError" || /429|5\\d\\d|timeout|timed out|network|fetch failed|connection reset|temporarily|part of the upload|resume from the saved byte/i.test(message);
+    const transient = error?.name === "TypeError" || /429|5\d\d|timeout|timed out|network|fetch failed|connection reset|temporarily|part of the upload|resume from the saved byte/i.test(message);
     const retry = hasPersistedSession && transient && Number(job.attempts || 0) < 5;
 
     if (retry) {
